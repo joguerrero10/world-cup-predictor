@@ -1,0 +1,49 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wcp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wcp}
+      POSTGRES_DB: ${POSTGRES_DB:-worldcup}
+    ports:
+      - "5433:5432" # host 5433 -> container 5432 (evita choque con otro Postgres en 5432)
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./app/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wcp}" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-wcp}:${POSTGRES_PASSWORD:-wcp}@db:5432/${POSTGRES_DB:-worldcup}
+    volumes:
+      - ./data:/app/data # archivos de tu PC visibles en /app/data dentro del contenedor
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+
+  streamlit:
+    build: .
+    depends_on:
+      api:
+        condition: service_healthy
+    command: streamlit run frontend/app.py --server.address 0.0.0.0 --server.port 8501
+    environment:
+      API_URL: http://api:8000
+    ports:
+      - "8501:8501"
+
+volumes:
+  pgdata:

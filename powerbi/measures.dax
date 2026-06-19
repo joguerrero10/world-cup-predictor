@@ -1,0 +1,126 @@
+// =====================================================================
+//  World Cup Predictor AI — Medidas DAX para Power BI
+//  Conecta Power BI directamente a PostgreSQL (tablas del schema.sql).
+//  Crea una tabla vacía "Measures" y pega cada medida ahí.
+//  Las medidas están agrupadas por las 7 páginas del informe.
+// =====================================================================
+
+// ---------- Página 1: Próximo partido (1X2) --------------------------
+// Filtra la tabla 'predictions' por el partido seleccionado en un segmentador.
+
+Prob Local =
+    AVERAGEX( FILTER('predictions', 'predictions'[model] = "hybrid"), 'predictions'[p_home] )
+
+Prob Empate =
+    AVERAGEX( FILTER('predictions', 'predictions'[model] = "hybrid"), 'predictions'[p_draw] )
+
+Prob Visitante =
+    AVERAGEX( FILTER('predictions', 'predictions'[model] = "hybrid"), 'predictions'[p_away] )
+
+Resultado Más Probable =
+    VAR h = [Prob Local] VAR d = [Prob Empate] VAR a = [Prob Visitante]
+    RETURN SWITCH( TRUE(),
+        h >= d && h >= a, "Gana local",
+        a >= h && a >= d, "Gana visitante",
+        "Empate" )
+
+// ---------- Página 2: Ranking Elo ------------------------------------
+// Usa la tabla 'elo_history' (snapshots por equipo y fecha).
+
+Elo Actual =
+    VAR maxDate = CALCULATE( MAX('elo_history'[as_of]), ALLEXCEPT('elo_history','elo_history'[team_id]) )
+    RETURN CALCULATE( MAX('elo_history'[rating]), 'elo_history'[as_of] = maxDate )
+
+Elo Ofensivo =
+    VAR maxDate = CALCULATE( MAX('elo_history'[as_of]), ALLEXCEPT('elo_history','elo_history'[team_id]) )
+    RETURN CALCULATE( MAX('elo_history'[attack]), 'elo_history'[as_of] = maxDate )
+
+Elo Defensivo =
+    VAR maxDate = CALCULATE( MAX('elo_history'[as_of]), ALLEXCEPT('elo_history','elo_history'[team_id]) )
+    RETURN CALCULATE( MAX('elo_history'[defense]), 'elo_history'[as_of] = maxDate )
+
+Ranking Elo =
+    RANKX( ALL('teams'[name]), [Elo Actual], , DESC, DENSE )
+
+// ---------- Página 3: Probabilidades de campeón ----------------------
+// Usa 'tournament_results' (una fila por equipo y simulación).
+
+Prob Campeón =
+    CALCULATE( AVERAGE('tournament_results'[p_champion]),
+        'simulations'[id] = MAX('simulations'[id]) )
+
+Prob Finalista =
+    CALCULATE( AVERAGE('tournament_results'[p_finalist]),
+        'simulations'[id] = MAX('simulations'[id]) )
+
+Prob Semifinalista =
+    CALCULATE( AVERAGE('tournament_results'[p_semifinalist]),
+        'simulations'[id] = MAX('simulations'[id]) )
+
+Prob Clasificar Grupo =
+    CALCULATE( AVERAGE('tournament_results'[p_group_qualify]),
+        'simulations'[id] = MAX('simulations'[id]) )
+
+// ---------- Página 4: Evolución histórica Elo ------------------------
+// Gráfico de líneas: eje X = elo_history[as_of], valor = Elo en Fecha.
+
+Elo en Fecha = MAX('elo_history'[rating])
+
+Elo Δ desde Inicio =
+    VAR first = CALCULATE( MIN('elo_history'[rating]),
+        ALLEXCEPT('elo_history','elo_history'[team_id]) )
+    RETURN [Elo en Fecha] - first
+
+// ---------- Página 5: Comparación Klement vs Elo vs Dixon-Coles ------
+// Compara la probabilidad de local que asigna cada modelo al partido seleccionado.
+
+Prob Local (Elo) =
+    AVERAGEX( FILTER('predictions','predictions'[model]="elo"), 'predictions'[p_home] )
+
+Prob Local (Dixon-Coles) =
+    AVERAGEX( FILTER('predictions','predictions'[model]="dixon_coles"), 'predictions'[p_home] )
+
+Prob Local (Klement) =
+    AVERAGEX( FILTER('predictions','predictions'[model]="klement"), 'predictions'[p_home] )
+
+Prob Local (Híbrido) = [Prob Local]
+
+// ---------- Página 6: Precisión histórica del modelo -----------------
+// Usa 'model_metrics' (una fila por evaluación y modelo).
+
+Accuracy =
+    CALCULATE( MAX('model_metrics'[accuracy]),
+        'model_metrics'[evaluated_at] = MAX('model_metrics'[evaluated_at]) )
+
+Brier Score =
+    CALCULATE( MIN('model_metrics'[brier_score]),
+        'model_metrics'[evaluated_at] = MAX('model_metrics'[evaluated_at]) )
+
+Log Loss =
+    CALCULATE( MIN('model_metrics'[log_loss]),
+        'model_metrics'[evaluated_at] = MAX('model_metrics'[evaluated_at]) )
+
+Calibration Error =
+    CALCULATE( MIN('model_metrics'[calibration_err]),
+        'model_metrics'[evaluated_at] = MAX('model_metrics'[evaluated_at]) )
+
+ROI =
+    CALCULATE( MAX('model_metrics'[roi]),
+        'model_metrics'[evaluated_at] = MAX('model_metrics'[evaluated_at]) )
+
+Mejor Modelo (menor LogLoss) =
+    VAR t = ADDCOLUMNS( ALL('model_metrics'[model]),
+        "ll", CALCULATE( MIN('model_metrics'[log_loss]) ) )
+    RETURN MINX( t, [ll] )
+
+Nombre Mejor Modelo =
+    VAR t = ADDCOLUMNS( ALL('model_metrics'[model]),
+        "ll", CALCULATE( MIN('model_metrics'[log_loss]) ) )
+    VAR best = MINX( t, [ll] )
+    RETURN MAXX( FILTER( t, [ll] = best ), 'model_metrics'[model] )
+
+// ---------- Página 7: Simulación interactiva -------------------------
+// Segmentador sobre 'simulations'[n_sims]; reutiliza las medidas de la Página 3
+// para mostrar cómo cambian las probabilidades según el número de simulaciones.
+
+Sims Seleccionadas = SELECTEDVALUE('simulations'[n_sims], 10000)
