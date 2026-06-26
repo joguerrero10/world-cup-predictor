@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { Brain, Sparkles, RefreshCw, Download, Shield, Sword } from "lucide-react"
+import { Brain, Sparkles, RefreshCw, Download } from "lucide-react"
 import { fetchEloRankings, fetchAIAnalysis, fetchPrediction } from "../api/endpoints"
 import { DuelBar, ProbBar } from "../components/ui/DuelBar"
 import { Badge } from "../components/ui/Badge"
@@ -16,8 +16,6 @@ const MODELS: { value: ModelType; label: string; desc: string }[] = [
   { value: "dixon_coles", label: "Dixon-Coles",   desc: "Modelo Poisson bivariado" },
   { value: "klement",     label: "Klement",       desc: "Factores socioeconómicos" },
 ]
-
-function pct(v: number) { return `${(v * 100).toFixed(1)}%` }
 
 export function AIAnalysis() {
   const [home, setHome] = useState("")

@@ -3,7 +3,7 @@ import { motion } from "framer-motion"
 import { useQuery } from "@tanstack/react-query"
 import { FlaskConical, ChevronDown, ChevronRight } from "lucide-react"
 import { fetchEloRankings, fetchModelWeights, fetchKlementFactors, fetchDixonColesParams } from "../api/endpoints"
-import { PlotlyChart, DonutChart, BarChart, LineChart } from "../components/ui/PlotlyChart"
+import { PlotlyChart, DonutChart } from "../components/ui/PlotlyChart"
 import { Badge } from "../components/ui/Badge"
 import { CardSkeleton } from "../components/ui/LoadingSkeleton"
 import type { Data } from "plotly.js"
@@ -40,7 +40,7 @@ export function Laboratory() {
   const { data: elo, isLoading: eloLoading } = useQuery({
     queryKey: ["elo-rankings"], queryFn: fetchEloRankings, staleTime: 60_000,
   })
-  const { data: weights, isLoading: wLoading } = useQuery({
+  const { data: weights } = useQuery({
     queryKey: ["model-weights"], queryFn: fetchModelWeights, staleTime: 60_000, retry: 1,
   })
   const { data: klement, isLoading: kLoading } = useQuery({
@@ -55,7 +55,7 @@ export function Laboratory() {
   // Elo scatter: attack vs defense
   const eloScatter: Data[] = elo ? [{
     type: "scatter",
-    mode: "markers+text",
+    mode: "markers+text" as any,
     x: top20Elo.map(t => t.attack),
     y: top20Elo.map(t => t.defense),
     text: top20Elo.map(t => t.team),
@@ -106,7 +106,7 @@ export function Laboratory() {
   const klTop = (klement ?? []).filter(k => k.klement_score != null).slice(0, 30)
   const klScatter: Data[] = klTop.length ? [{
     type: "scatter",
-    mode: "markers+text",
+    mode: "markers+text" as any,
     x: klTop.map(k => k.gdp_per_capita ?? 0),
     y: klTop.map(k => k.klement_score ?? 0),
     text: klTop.map(k => k.team),

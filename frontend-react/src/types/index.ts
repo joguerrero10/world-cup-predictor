@@ -155,6 +155,7 @@ export interface AIAnalysisReport {
   model_contributions: ModelWeights
   data_sources: string[]
   confidence: "high" | "medium" | "low"
+  model_accuracy?: number | null
 }
 
 export interface ChatMessage {

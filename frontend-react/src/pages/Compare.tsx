@@ -4,12 +4,10 @@ import { useQuery, useMutation } from "@tanstack/react-query"
 import { GitCompare, RefreshCw } from "lucide-react"
 import { fetchEloRankings, fetchPrediction } from "../api/endpoints"
 import { PlotlyChart } from "../components/ui/PlotlyChart"
-import { DuelBar, ProbBar } from "../components/ui/DuelBar"
+import { DuelBar } from "../components/ui/DuelBar"
 import { Badge } from "../components/ui/Badge"
 import type { Data } from "plotly.js"
 import clsx from "clsx"
-
-function pct(v: number) { return `${(v * 100).toFixed(1)}%` }
 
 export function Compare() {
   const [teamA, setTeamA] = useState("")

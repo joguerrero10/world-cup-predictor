@@ -54,7 +54,7 @@ export function PlotlyChart({ data, layout = {}, height = 300, className = "", c
 
 // ─── Preset Charts ────────────────────────────────────────────────────────────
 
-export function GaugeChart({ value, max = 1, label, color = "#00D4FF" }: { value: number; max?: number; label: string; color?: string }) {
+export function GaugeChart({ value, label, color = "#00D4FF" }: { value: number; max?: number; label: string; color?: string }) {
   return (
     <PlotlyChart
       height={200}

@@ -1,11 +1,10 @@
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { Trophy, Play, RefreshCw, Download, ChevronDown } from "lucide-react"
+import { Trophy, Play, RefreshCw, Download } from "lucide-react"
 import { createSimulationJob, fetchSimulationJob, fetchSimulationJobResult, fetchEloRankings } from "../api/endpoints"
 import { PlotlyChart, DonutChart } from "../components/ui/PlotlyChart"
 import { Badge } from "../components/ui/Badge"
-import { ProbBar } from "../components/ui/DuelBar"
 import type { SimulationJobStatus, TournamentProbs } from "../types"
 import type { Data } from "plotly.js"
 import clsx from "clsx"
@@ -38,7 +37,7 @@ export function TournamentSimulator() {
   const [result, setResult] = useState<TournamentProbs | null>(null)
   const [elapsed, setElapsed] = useState(0)
 
-  const { data: elo } = useQuery({ queryKey: ["elo-rankings"], queryFn: fetchEloRankings, staleTime: 60_000 })
+  useQuery({ queryKey: ["elo-rankings"], queryFn: fetchEloRankings, staleTime: 60_000 })
 
   // Poll job status
   useQuery({
@@ -71,7 +70,6 @@ export function TournamentSimulator() {
 
   const isRunning = job?.status === "running" || job?.status === "queued"
   const champion = result?.champion ? Object.entries(result.champion).sort((a, b) => b[1] - a[1]) : []
-  const finalist = result?.finalist ? Object.entries(result.finalist).sort((a, b) => b[1] - a[1]) : []
   const top10Champ = champion.slice(0, 10)
 
   // Chart: champion bar

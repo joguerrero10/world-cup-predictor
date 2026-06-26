@@ -1,5 +1,4 @@
 import { motion } from "framer-motion"
-import clsx from "clsx"
 
 interface Props {
   home: string

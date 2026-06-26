@@ -1,5 +1,5 @@
 import { motion } from "framer-motion"
-import { Menu, RefreshCw, Bell, Wifi, WifiOff } from "lucide-react"
+import { Menu, RefreshCw, Wifi, WifiOff } from "lucide-react"
 import { useAppStore } from "../../store/useAppStore"
 import { useQuery } from "@tanstack/react-query"
 import { fetchHealth } from "../../api/endpoints"

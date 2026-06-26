@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { motion } from "framer-motion"
 import { useQuery } from "@tanstack/react-query"
-import { Users, Search, Trophy, Shield, Sword } from "lucide-react"
+import { Users, Search, Shield, Sword } from "lucide-react"
 import { fetchEloRankings } from "../api/endpoints"
 import { PlotlyChart } from "../components/ui/PlotlyChart"
 import { Badge } from "../components/ui/Badge"
@@ -121,7 +121,7 @@ export function Teams() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((team, i) => (
+                  {filtered.map((team) => (
                     <tr key={team.team} className={selected === team.team ? "bg-cyan/5 border-cyan/20" : ""}>
                       <td className={clsx("font-display text-lg", team.rank <= 3 ? "text-amber" : "text-muted")}>
                         {team.rank <= 3 ? ["🥇","🥈","🥉"][team.rank - 1] : team.rank}

@@ -1,6 +1,6 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import type { Page, AppSettings, HistoryEntry, Theme, Language, ModelType } from "../types"
+import type { Page, AppSettings, HistoryEntry } from "../types"
 
 interface AppState {
   currentPage: Page

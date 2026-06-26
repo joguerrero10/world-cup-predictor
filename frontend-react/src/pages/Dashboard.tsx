@@ -1,7 +1,7 @@
 import { motion } from "framer-motion"
 import { useQuery } from "@tanstack/react-query"
 import {
-  Users, Trophy, Activity, Cpu, Server, Database,
+  Users, Trophy, Activity,
   TrendingUp, Clock, Zap, CheckCircle, AlertCircle, BarChart3
 } from "lucide-react"
 import { StatCard } from "../components/ui/StatCard"

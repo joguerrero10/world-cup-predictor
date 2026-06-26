@@ -24,7 +24,7 @@ export function Statistics() {
     nbinsx: 20,
     marker: { color: "#00D4FF50", line: { color: "#00D4FF", width: 1 } },
     hovertemplate: "Rango %{x}: %{y} equipos<extra></extra>",
-  }] : []
+  } as any as Data] : []
 
   // Attack vs Defense scatter all teams
   const scatterAll: Data[] = elo ? [{

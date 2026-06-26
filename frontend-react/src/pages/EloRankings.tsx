@@ -1,10 +1,9 @@
 import { useState } from "react"
 import { motion } from "framer-motion"
 import { useQuery } from "@tanstack/react-query"
-import { Globe2, Search, Download, TrendingUp, TrendingDown } from "lucide-react"
+import { Search, Download } from "lucide-react"
 import { fetchEloRankings } from "../api/endpoints"
 import { PlotlyChart } from "../components/ui/PlotlyChart"
-import { Badge } from "../components/ui/Badge"
 import { TableRowSkeleton } from "../components/ui/LoadingSkeleton"
 import type { Data } from "plotly.js"
 
@@ -44,7 +43,7 @@ export function EloRankings() {
 
   const scatterData: Data[] = [{
     type: "scatter",
-    mode: "markers+text",
+    mode: "markers+text" as any,
     x: (elo ?? []).map(t => t.attack),
     y: (elo ?? []).map(t => t.defense),
     text: (elo ?? []).map(t => t.team),

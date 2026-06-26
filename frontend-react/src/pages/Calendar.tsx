@@ -1,4 +1,4 @@
-import { Calendar as CalIcon, Clock } from "lucide-react"
+import { Calendar as CalIcon } from "lucide-react"
 import { Badge } from "../components/ui/Badge"
 
 const UPCOMING = [

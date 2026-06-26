@@ -6,7 +6,6 @@ import { fetchEloRankings, fetchPrediction, fetchAIAnalysis } from "../api/endpo
 import { DuelBar, ProbBar } from "../components/ui/DuelBar"
 import { Badge } from "../components/ui/Badge"
 import { PlotlyChart, GaugeChart, DonutChart } from "../components/ui/PlotlyChart"
-import { CardSkeleton } from "../components/ui/LoadingSkeleton"
 import type { ModelType } from "../types"
 import type { Data } from "plotly.js"
 import clsx from "clsx"
@@ -21,7 +20,7 @@ const MODELS: { value: ModelType; label: string }[] = [
 ]
 
 const GOAL_PROBS = (lambda: number) => {
-  const factorial = (n: number) => n <= 1 ? 1 : n * factorial(n - 1)
+  const factorial = (n: number): number => n <= 1 ? 1 : n * factorial(n - 1)
   return Array.from({ length: 6 }, (_, k) => ({
     k,
     p: Math.exp(-lambda) * Math.pow(lambda, k) / factorial(k),

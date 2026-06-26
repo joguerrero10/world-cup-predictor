@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { motion } from "framer-motion"
 import { useQuery } from "@tanstack/react-query"
-import { User, Search, Filter, SortAsc } from "lucide-react"
+import { User, Search } from "lucide-react"
 import { fetchEloRankings, fetchPlayers } from "../api/endpoints"
 import { Badge } from "../components/ui/Badge"
 import { TableRowSkeleton } from "../components/ui/LoadingSkeleton"
@@ -9,10 +9,6 @@ import clsx from "clsx"
 
 const POSITIONS = ["Todos", "GK", "DEF", "MID", "FWD"]
 
-function StatBadge({ value, unit = "" }: { value: number | null | undefined; unit?: string }) {
-  if (value == null) return <span className="text-muted text-xs">—</span>
-  return <span className="text-text font-mono text-sm">{value.toFixed(2)}{unit}</span>
-}
 
 export function Players() {
   const [selectedTeam, setSelectedTeam] = useState("")

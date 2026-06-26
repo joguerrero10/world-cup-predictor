@@ -3,8 +3,6 @@ import { History as HistoryIcon, Trash2, Download } from "lucide-react"
 import { useAppStore } from "../store/useAppStore"
 import { Badge } from "../components/ui/Badge"
 
-function pct(v: number) { return `${(v * 100).toFixed(1)}%` }
-
 export function History() {
   const { history, clearHistory } = useAppStore()
 
@@ -76,7 +74,7 @@ export function History() {
                 <p className="text-sm font-medium text-text truncate">{entry.label}</p>
                 <p className="text-xs text-muted">{new Date(entry.timestamp).toLocaleString("es")}</p>
               </div>
-              <Badge variant={entry.type === "prediction" ? "cyan" : entry.type === "simulation" ? "amber" : "violet"}>
+              <Badge variant={entry.type === "prediction" ? "cyan" : entry.type === "simulation" ? "amber" : "purple"}>
                 {entry.type}
               </Badge>
             </motion.div>

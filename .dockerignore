@@ -48,3 +48,8 @@ logs/
 dist/
 build/
 *.egg-info/
+
+# Frontend node_modules y dist (se generan dentro del contenedor)
+frontend-react/node_modules/
+frontend-react/dist/
+frontend-react/.env.local

@@ -260,3 +260,57 @@ CREATE TABLE IF NOT EXISTS model_metrics (
     calibration_err DOUBLE PRECISION,
     roi             DOUBLE PRECISION
 );
+
+-- ── ETL Audit & Observability ─────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS update_logs (
+    id                  SERIAL PRIMARY KEY,
+    started_at          TIMESTAMP DEFAULT now(),
+    completed_at        TIMESTAMP,
+    competition_slug    TEXT,
+    data_type           TEXT NOT NULL,
+    records_fetched     INTEGER DEFAULT 0,
+    records_inserted    INTEGER DEFAULT 0,
+    records_updated     INTEGER DEFAULT 0,
+    records_skipped     INTEGER DEFAULT 0,
+    errors              INTEGER DEFAULT 0,
+    status              TEXT DEFAULT 'running',         -- running|completed|failed
+    error_detail        TEXT,
+    duration_seconds    DOUBLE PRECISION,
+    providers_used      JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_update_logs_started ON update_logs(started_at);
+CREATE INDEX IF NOT EXISTS idx_update_logs_status  ON update_logs(status);
+
+CREATE TABLE IF NOT EXISTS provider_logs (
+    id                  SERIAL PRIMARY KEY,
+    logged_at           TIMESTAMP DEFAULT now(),
+    provider_name       TEXT NOT NULL,
+    competition_slug    TEXT,
+    data_type           TEXT NOT NULL,
+    records_fetched     INTEGER DEFAULT 0,
+    records_valid       INTEGER DEFAULT 0,
+    duration_seconds    DOUBLE PRECISION DEFAULT 0,
+    success             BOOLEAN DEFAULT TRUE,
+    error_message       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_provider_logs_provider ON provider_logs(provider_name);
+CREATE INDEX IF NOT EXISTS idx_provider_logs_logged   ON provider_logs(logged_at);
+
+CREATE TABLE IF NOT EXISTS standings (
+    id                  SERIAL PRIMARY KEY,
+    team_id             INTEGER REFERENCES teams(id),
+    competition_slug    TEXT NOT NULL,
+    season_year         INTEGER NOT NULL,
+    position            INTEGER NOT NULL,
+    played              INTEGER DEFAULT 0,
+    won                 INTEGER DEFAULT 0,
+    drawn               INTEGER DEFAULT 0,
+    lost                INTEGER DEFAULT 0,
+    goals_for           INTEGER DEFAULT 0,
+    goals_against       INTEGER DEFAULT 0,
+    points              INTEGER DEFAULT 0,
+    last_updated        TIMESTAMP DEFAULT now(),
+    CONSTRAINT uq_standing UNIQUE (team_id, competition_slug, season_year)
+);
+CREATE INDEX IF NOT EXISTS idx_standings_comp_season ON standings(competition_slug, season_year);

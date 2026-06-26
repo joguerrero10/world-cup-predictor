@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Crosshair, Trophy, BarChart3, Globe2,
   FlaskConical, Brain, User, Users, Calendar, TrendingUp,
   BarChart2, Settings, ChevronLeft, ChevronRight,
-  GitCompare, History, MessageSquare, Menu
+  GitCompare, History, MessageSquare
 } from "lucide-react"
 import type { Page } from "../../types"
 import { useAppStore } from "../../store/useAppStore"
@@ -90,7 +90,7 @@ export function Sidebar() {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
-          {NAV.map((item, i) => {
+          {NAV.map((item) => {
             const isActive = currentPage === item.id
             const Icon = item.icon
             const showGroup = item.group && sidebarOpen

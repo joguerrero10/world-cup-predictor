@@ -101,7 +101,7 @@ export function AIChat() {
   const { mutate: sendMsg, isPending } = useMutation({
     mutationFn: (text: string) =>
       sendChatMessage(text, messages.map(m => ({ role: m.role, content: m.content }))),
-    onSuccess: (data, text) => {
+    onSuccess: (data) => {
       setMessages(prev => [
         ...prev,
         {
