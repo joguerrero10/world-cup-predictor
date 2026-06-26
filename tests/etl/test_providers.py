@@ -229,7 +229,8 @@ class TestWorldBankProvider:
 
     @patch("etl.providers.world_bank.requests.get")
     def test_fetch_macro_data_handles_error(self, mock_get):
-        mock_get.side_effect = Exception("Connection error")
+        import requests as req_lib
+        mock_get.side_effect = req_lib.ConnectionError("Connection error")
         provider = WorldBankProvider()
         data = provider._fetch_indicator("NY.GDP.PCAP.CD")
         assert data == {}
