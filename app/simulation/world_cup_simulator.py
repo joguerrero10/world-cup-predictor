@@ -268,22 +268,49 @@ class WorldCupSimulator(BaseSimulator):
         )
 
     def _run_parallel(self, n_sims: int, seed=None) -> WorldCupResult:
-        """Divide el trabajo en workers."""
+        """
+        Divide el trabajo en workers pasando SOLO numpy arrays (picklables).
+        La prob_matrix ya está calculada — no necesitamos pasar el modelo (closure).
+        """
+        prob_matrix = self._build_prob_matrix()
         n_workers = min(self.MAX_WORKERS, mp.cpu_count() or 1)
         chunk = n_sims // n_workers
         sizes = [chunk] * n_workers
         sizes[-1] += n_sims - sum(sizes)
-
         seeds = list(np.random.SeedSequence(seed).spawn(n_workers))
 
-        args = [(self, sz, s) for sz, s in zip(sizes, seeds)]
+        # Pasar solo datos serializables: prob_matrix, grupos (strings), n_sims, seed
+        args = [
+            (self.teams, self._groups, self._group_list, prob_matrix, sz, s)
+            for sz, s in zip(sizes, seeds)
+        ]
         with mp.Pool(n_workers) as pool:
             partials = pool.starmap(_wc_chunk_worker, args)
 
         return _merge_wc_results(partials, n_sims)
 
 
-def _wc_chunk_worker(sim: WorldCupSimulator, n_sims: int, seed) -> WorldCupResult:
+def _wc_chunk_worker(
+    teams: list[str],
+    groups: dict[str, list[str]],
+    group_list: list[str],
+    prob_matrix: np.ndarray,
+    n_sims: int,
+    seed,
+) -> WorldCupResult:
+    """Worker function — recibe solo datos picklables, sin closures."""
+    from app.simulation.world_cup_simulator import WorldCupSimulator
+    # Crear un simulador sin modelo (prob_matrix ya precalculada)
+    sim = WorldCupSimulator.__new__(WorldCupSimulator)
+    sim.competition_id = WorldCupSimulator.COMPETITION_ID
+    sim.teams = teams
+    sim._groups = groups
+    sim._group_list = group_list
+    sim._n = len(teams)
+    sim._idx = {t: i for i, t in enumerate(teams)}
+    sim._prob_matrix = prob_matrix   # inyectar directamente
+    sim.neutral = True
+    sim.model = None
     return sim._run_chunk(n_sims, seed)
 
 

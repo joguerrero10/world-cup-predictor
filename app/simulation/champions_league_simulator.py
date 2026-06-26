@@ -208,13 +208,14 @@ class ChampionsLeagueSimulator(BaseSimulator):
         )
 
     def _run_parallel(self, n_sims: int, seed=None) -> UCLResult:
+        prob_matrix = self._build_prob_matrix()
         n_workers = min(self.MAX_WORKERS, mp.cpu_count() or 1)
         chunk = n_sims // n_workers
         sizes = [chunk] * n_workers
         sizes[-1] += n_sims - sum(sizes)
         seeds = list(np.random.SeedSequence(seed).spawn(n_workers))
 
-        args = [(self, sz, s) for sz, s in zip(sizes, seeds)]
+        args = [(self.teams, prob_matrix, sz, s) for sz, s in zip(sizes, seeds)]
         with mp.Pool(n_workers) as pool:
             partials = pool.starmap(_ucl_chunk_worker, args)
 
@@ -244,7 +245,21 @@ def _build_partial_schedule(n: int, matches_per_team: int, rng: np.random.Genera
     return selected
 
 
-def _ucl_chunk_worker(sim: ChampionsLeagueSimulator, n_sims: int, seed) -> UCLResult:
+def _ucl_chunk_worker(
+    teams: list[str],
+    prob_matrix: np.ndarray,
+    n_sims: int,
+    seed,
+) -> UCLResult:
+    from app.simulation.champions_league_simulator import ChampionsLeagueSimulator
+    sim = ChampionsLeagueSimulator.__new__(ChampionsLeagueSimulator)
+    sim.competition_id = ChampionsLeagueSimulator.COMPETITION_ID
+    sim.teams = teams
+    sim._n = len(teams)
+    sim._idx = {t: i for i, t in enumerate(teams)}
+    sim._prob_matrix = prob_matrix
+    sim.neutral = False
+    sim.model = None
     return sim._run_chunk(n_sims, seed)
 
 

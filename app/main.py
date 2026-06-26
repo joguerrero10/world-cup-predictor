@@ -210,9 +210,8 @@ def _predict_match_impl(home: str, away: str, neutral: bool, model: str) -> Pred
             klement=klement_p(),
         )
         if blend_result is None:
-    # usar Elo como respaldo
-         p = elo_p()
-         src = "elo_fallback"
+            p = elo_p()
+            src = "elo_fallback"
         else:
             p, src = blend_result
 

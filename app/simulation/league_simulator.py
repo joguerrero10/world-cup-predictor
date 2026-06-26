@@ -268,20 +268,47 @@ class LeagueSimulator(BaseSimulator):
         )
 
     def _run_parallel(self, n_sims: int, seed=None) -> LeagueResult:
+        prob_matrix = self._build_prob_matrix()
+        schedule = self._build_schedule()
+        p_cum = self._build_schedule_probs(prob_matrix, schedule)
         n_workers = min(self.MAX_WORKERS, mp.cpu_count() or 1)
         chunk = n_sims // n_workers
         sizes = [chunk] * n_workers
         sizes[-1] += n_sims - sum(sizes)
         seeds = list(np.random.SeedSequence(seed).spawn(n_workers))
 
-        args = [(self, sz, s) for sz, s in zip(sizes, seeds)]
+        rel = self._config.relegation_spots
+        ucl = self._config.ucl_spots
+        eu  = ucl + self._config.uel_spots + self._config.uecl_spots
+
+        args = [
+            (self.teams, self.competition_id, prob_matrix, schedule, p_cum,
+             rel, ucl, eu, self.lambda_home, self.lambda_away, sz, s)
+            for sz, s in zip(sizes, seeds)
+        ]
         with mp.Pool(n_workers) as pool:
             partials = pool.starmap(_league_chunk_worker, args)
 
         return _merge_league_results(partials, n_sims)
 
 
-def _league_chunk_worker(sim: LeagueSimulator, n_sims: int, seed) -> LeagueResult:
+def _league_chunk_worker(
+    teams, competition_id, prob_matrix, schedule, p_cum,
+    rel, ucl, eu, lam_h, lam_a, n_sims, seed
+) -> LeagueResult:
+    from app.simulation.league_simulator import LeagueSimulator
+    from app.models.competition import get_competition
+    sim = LeagueSimulator.__new__(LeagueSimulator)
+    sim.teams = teams
+    sim.competition_id = competition_id
+    sim._n = len(teams)
+    sim._idx = {t: i for i, t in enumerate(teams)}
+    sim._prob_matrix = prob_matrix
+    sim.neutral = False
+    sim.model = None
+    sim._config = get_competition(competition_id)
+    sim.lambda_home = lam_h
+    sim.lambda_away = lam_a
     return sim._run_chunk(n_sims, seed)
 
 

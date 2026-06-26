@@ -86,6 +86,33 @@ class SyncReport:
         }
 
 
+def run_pipeline(
+    competition_slug: str,
+    data_types: Optional[list[str]] = None,
+    season: Optional[int] = None,
+    force_retrain: bool = False,
+) -> dict:
+    """
+    Convenience wrapper para lanzar el ETL desde el scheduler o scripts externos.
+
+    Returns: dict con resumen de la ejecución (status, records, duration).
+    """
+    pipeline = ETLPipeline()
+    reports = pipeline.sync_competition(
+        competition_slug=competition_slug,
+        data_types=data_types or ["teams", "matches", "standings"],
+        season=season,
+        force_retrain=force_retrain,
+    )
+    return {
+        "competition_slug": competition_slug,
+        "reports": [r.to_dict() for r in reports],
+        "status": "completed" if all(r.status == "completed" for r in reports) else "partial",
+        "records_inserted": sum(r.records_inserted for r in reports),
+        "records_updated": sum(r.records_updated for r in reports),
+    }
+
+
 class ETLPipeline:
     """
     Pipeline ETL multicompetición.

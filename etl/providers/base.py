@@ -63,6 +63,14 @@ class PlayerData:
     shirt_number: Optional[int] = None
     market_value_eur: Optional[float] = None
     data_source: Optional[str] = None
+    # Estadísticas por 90 min (opcionales, rellenadas por proveedores avanzados)
+    goals_per_90: Optional[float] = None
+    assists_per_90: Optional[float] = None
+    xg_per_90: Optional[float] = None
+    minutes_played: Optional[int] = None
+    yellow_cards_per_90: Optional[float] = None
+    red_cards_per_90: Optional[float] = None
+    overall_rating: Optional[float] = None
 
 
 @dataclass

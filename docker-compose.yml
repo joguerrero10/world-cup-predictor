@@ -120,6 +120,39 @@ services:
       - "3000:80"
     restart: unless-stopped
 
+  # ── Scheduler ETL standalone (alternativa a Celery Beat) ────────────────
+  scheduler:
+    build: .
+    command: python -m services.scheduler.main
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-wcp}:${POSTGRES_PASSWORD:-wcp}@db:5432/${POSTGRES_DB:-worldcup}
+      REDIS_URL:    redis://redis:6379/0
+    volumes:
+      - ./data:/app/data
+    profiles:
+      - apscheduler   # docker compose --profile apscheduler up scheduler
+    restart: unless-stopped
+
+  # ── ETL Updater (job puntual, no daemon) ─────────────────────────────────
+  updater:
+    build: .
+    command: python -m services.updater.main --all
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-wcp}:${POSTGRES_PASSWORD:-wcp}@db:5432/${POSTGRES_DB:-worldcup}
+    volumes:
+      - ./data:/app/data
+    profiles:
+      - etl   # docker compose --profile etl run updater
+    restart: "no"
+
   # ── Frontend Streamlit (legacy, arranca con --profile legacy) ─────────────
   streamlit:
     build: .
