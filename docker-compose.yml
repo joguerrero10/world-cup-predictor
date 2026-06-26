@@ -54,14 +54,14 @@ services:
       retries: 10
       start_period: 120s
 
-  # ── Worker Celery (simulaciones pesadas) ──────────────────────────────────
+  # ── Worker Celery (simulaciones + ETL) ────────────────────────────────────
   worker:
     build: .
     command: >
       celery -A app.celery_app worker
       --loglevel=info
       --concurrency=${CELERY_CONCURRENCY:-4}
-      --queues=simulations,default
+      --queues=simulations,etl,default
     depends_on:
       db:
         condition: service_healthy
@@ -70,7 +70,10 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-wcp}:${POSTGRES_PASSWORD:-wcp}@db:5432/${POSTGRES_DB:-worldcup}
       REDIS_URL: redis://redis:6379/0
+      API_URL: http://api:8000
       CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-4}
+      FOOTBALL_DATA_API_KEY: ${FOOTBALL_DATA_API_KEY:-}
+      PROVIDER_LOCAL_CSV_ENABLED: ${PROVIDER_LOCAL_CSV_ENABLED:-true}
     volumes:
       - ./data:/app/data
     deploy:
@@ -78,6 +81,28 @@ services:
         limits:
           cpus: '${WORKER_CPU_LIMIT:-4}'
           memory: ${WORKER_MEM_LIMIT:-4G}
+
+  # ── Celery Beat (scheduler automático) ────────────────────────────────────
+  beat:
+    build: .
+    command: >
+      celery -A app.celery_app beat
+      --loglevel=info
+      --scheduler celery.beat:PersistentScheduler
+      --schedule /tmp/celerybeat-schedule
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-wcp}:${POSTGRES_PASSWORD:-wcp}@db:5432/${POSTGRES_DB:-worldcup}
+      REDIS_URL: redis://redis:6379/0
+      API_URL: http://api:8000
+      FOOTBALL_DATA_API_KEY: ${FOOTBALL_DATA_API_KEY:-}
+    volumes:
+      - ./data:/app/data
+      - beatdata:/tmp
 
   # ── Flower (monitoring Celery) ─────────────────────────────────────────────
   flower:
@@ -107,3 +132,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  beatdata:

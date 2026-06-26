@@ -1,0 +1,139 @@
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background-color: #0A0E1A;
+    color: #E2E8F0;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: #111827; }
+  ::-webkit-scrollbar-thumb { background: #1E2D40; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #00D4FF40; }
+}
+
+@layer components {
+  .card {
+    @apply bg-surface border border-border rounded-xl p-4;
+  }
+  .card-hover {
+    @apply card transition-all duration-200 hover:border-cyan/30 hover:shadow-lg hover:shadow-cyan/5;
+  }
+  .btn-primary {
+    @apply bg-cyan text-bg font-display tracking-widest text-sm px-5 py-2 rounded-lg
+           hover:opacity-85 transition-opacity active:scale-95 transition-transform;
+  }
+  .btn-ghost {
+    @apply border border-border text-muted hover:border-cyan/50 hover:text-cyan
+           font-medium text-sm px-4 py-2 rounded-lg transition-all duration-150;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  .badge-cyan   { @apply badge bg-cyan/10 text-cyan border border-cyan/20; }
+  .badge-amber  { @apply badge bg-amber/10 text-amber border border-amber/20; }
+  .badge-green  { @apply badge bg-emerald/10 text-emerald border border-emerald/20; }
+  .badge-red    { @apply badge bg-scarlet/10 text-scarlet border border-scarlet/20; }
+  .badge-purple { @apply badge bg-violet/10 text-violet border border-violet/20; }
+  .badge-muted  { @apply badge bg-muted/10 text-muted border border-muted/20; }
+  .stat-card {
+    @apply card flex flex-col gap-1;
+  }
+  .stat-value {
+    @apply font-display text-3xl tracking-wider text-text;
+  }
+  .stat-label {
+    @apply text-xs uppercase tracking-widest text-muted;
+  }
+  .section-title {
+    @apply font-display text-2xl tracking-wider text-text;
+  }
+  .section-label {
+    @apply text-xs uppercase tracking-widest text-cyan font-semibold;
+  }
+  .sidebar-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-muted hover:text-text
+           hover:bg-white/5 transition-all duration-150 cursor-pointer text-sm font-medium;
+  }
+  .sidebar-item.active {
+    @apply bg-cyan/10 text-cyan border border-cyan/20;
+  }
+  .progress-bar {
+    @apply h-1.5 rounded-full bg-border overflow-hidden;
+  }
+  .progress-fill {
+    @apply h-full rounded-full transition-all duration-500;
+  }
+  .duel-bar-home { background: #00D4FF; }
+  .duel-bar-draw { background: #64748B; }
+  .duel-bar-away { background: #F0B429; }
+  .skeleton {
+    @apply bg-border/50 rounded animate-pulse;
+  }
+  .glass {
+    backdrop-filter: blur(12px);
+    background: rgba(17, 24, 39, 0.7);
+    border: 1px solid rgba(30, 45, 64, 0.8);
+  }
+  .glow-cyan {
+    box-shadow: 0 0 20px rgba(0, 212, 255, 0.15);
+  }
+  .glow-amber {
+    box-shadow: 0 0 20px rgba(240, 180, 41, 0.15);
+  }
+  .team-badge {
+    @apply w-10 h-10 rounded-full bg-surface border border-border flex items-center justify-center text-lg;
+  }
+  .input-dark {
+    @apply bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text
+           placeholder:text-muted focus:outline-none focus:border-cyan/50 transition-colors;
+  }
+  .select-dark {
+    @apply input-dark appearance-none cursor-pointer;
+  }
+  .table-dark {
+    @apply w-full text-sm;
+  }
+  .table-dark thead tr {
+    @apply border-b border-border;
+  }
+  .table-dark thead th {
+    @apply text-left py-2 px-3 text-xs uppercase tracking-wider text-muted font-medium;
+  }
+  .table-dark tbody tr {
+    @apply border-b border-border/50 hover:bg-white/2 transition-colors;
+  }
+  .table-dark tbody td {
+    @apply py-2.5 px-3;
+  }
+}
+
+@layer utilities {
+  .text-gradient-cyan {
+    background: linear-gradient(90deg, #00D4FF, #0099CC);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .text-gradient-gold {
+    background: linear-gradient(90deg, #F0B429, #E09020);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .bg-white\/2 { background-color: rgba(255,255,255,0.02); }
+  .bg-white\/5 { background-color: rgba(255,255,255,0.05); }
+  .hover\:bg-white\/5:hover { background-color: rgba(255,255,255,0.05); }
+}

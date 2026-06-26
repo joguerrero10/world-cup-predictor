@@ -417,3 +417,79 @@ class ModelMetric(Base):
     log_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
     calibration_err: Mapped[float | None] = mapped_column(Float, nullable=True)
     roi: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# ETL Audit & Observability
+# ---------------------------------------------------------------------------
+
+class UpdateLog(Base):
+    """Un registro por ejecución de pipeline ETL."""
+    __tablename__ = "update_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    competition_slug: Mapped[str | None] = mapped_column(String, nullable=True)
+    data_type: Mapped[str] = mapped_column(String)
+    # matches|teams|players|standings|rankings|factors
+    records_fetched: Mapped[int] = mapped_column(Integer, default=0)
+    records_inserted: Mapped[int] = mapped_column(Integer, default=0)
+    records_updated: Mapped[int] = mapped_column(Integer, default=0)
+    records_skipped: Mapped[int] = mapped_column(Integer, default=0)
+    errors: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String, default="running")
+    # running|completed|failed
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    providers_used: Mapped[list | None] = mapped_column(PortableJSON, nullable=True)
+
+    __table_args__ = (
+        Index("idx_update_logs_started", "started_at"),
+        Index("idx_update_logs_status", "status"),
+    )
+
+
+class ProviderLog(Base):
+    """Un registro por llamada a proveedor externo."""
+    __tablename__ = "provider_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    logged_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    provider_name: Mapped[str] = mapped_column(String)
+    competition_slug: Mapped[str | None] = mapped_column(String, nullable=True)
+    data_type: Mapped[str] = mapped_column(String)
+    records_fetched: Mapped[int] = mapped_column(Integer, default=0)
+    records_valid: Mapped[int] = mapped_column(Integer, default=0)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    success: Mapped[bool] = mapped_column(Boolean, default=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("idx_provider_logs_provider", "provider_name"),
+        Index("idx_provider_logs_logged", "logged_at"),
+    )
+
+
+class Standing(Base):
+    """Clasificación de liga por temporada — se sobreescribe en cada sync."""
+    __tablename__ = "standings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"))
+    competition_slug: Mapped[str] = mapped_column(String)
+    season_year: Mapped[int] = mapped_column(Integer)
+    position: Mapped[int] = mapped_column(Integer)
+    played: Mapped[int] = mapped_column(Integer, default=0)
+    won: Mapped[int] = mapped_column(Integer, default=0)
+    drawn: Mapped[int] = mapped_column(Integer, default=0)
+    lost: Mapped[int] = mapped_column(Integer, default=0)
+    goals_for: Mapped[int] = mapped_column(Integer, default=0)
+    goals_against: Mapped[int] = mapped_column(Integer, default=0)
+    points: Mapped[int] = mapped_column(Integer, default=0)
+    last_updated: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("team_id", "competition_slug", "season_year", name="uq_standing"),
+        Index("idx_standings_comp_season", "competition_slug", "season_year"),
+    )
