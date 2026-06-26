@@ -1,0 +1,50 @@
+# Entornos virtuales — nunca copiar al contenedor
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Bases de datos locales
+*.db
+*.sqlite
+*.sqlite3
+
+# Variables de entorno locales
+.env
+.env.local
+.env.*.local
+
+# Git
+.git/
+.gitignore
+
+# Tests y benchmarks (no necesarios en runtime)
+tests/
+
+# Datos locales (se montan como volumen en docker-compose)
+data/*.csv
+data/*.xlsx
+
+# CI/CD
+.github/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
