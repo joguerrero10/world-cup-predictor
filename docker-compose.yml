@@ -1,4 +1,6 @@
 services:
+
+  # ── Base de datos ─────────────────────────────────────────────────────────
   db:
     image: postgres:16
     environment:
@@ -6,40 +8,97 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wcp}
       POSTGRES_DB: ${POSTGRES_DB:-worldcup}
     ports:
-      - "5433:5432" # host 5433 -> container 5432 (evita choque con otro Postgres en 5432)
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./app/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wcp}" ]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wcp}"]
       interval: 5s
       timeout: 3s
       retries: 5
 
+  # ── Cache + Cola de mensajes ──────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── API FastAPI ───────────────────────────────────────────────────────────
   api:
     build: .
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-wcp}:${POSTGRES_PASSWORD:-wcp}@db:5432/${POSTGRES_DB:-worldcup}
+      REDIS_URL: redis://redis:6379/0
+      API_WORKERS: ${API_WORKERS:-2}
     volumes:
-      - ./data:/app/data # archivos de tu PC visibles en /app/data dentro del contenedor
+      - ./data:/app/data
     ports:
       - "8000:8000"
     healthcheck:
-      test: [ "CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1" ]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 120s
 
+  # ── Worker Celery (simulaciones pesadas) ──────────────────────────────────
+  worker:
+    build: .
+    command: >
+      celery -A app.celery_app worker
+      --loglevel=info
+      --concurrency=${CELERY_CONCURRENCY:-4}
+      --queues=simulations,default
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-wcp}:${POSTGRES_PASSWORD:-wcp}@db:5432/${POSTGRES_DB:-worldcup}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-4}
+    volumes:
+      - ./data:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: '${WORKER_CPU_LIMIT:-4}'
+          memory: ${WORKER_MEM_LIMIT:-4G}
+
+  # ── Flower (monitoring Celery) ─────────────────────────────────────────────
+  flower:
+    build: .
+    command: celery -A app.celery_app flower --port=5555
+    depends_on:
+      - redis
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    profiles:
+      - monitoring   # solo se levanta con: docker compose --profile monitoring up
+
+  # ── Frontend Streamlit ────────────────────────────────────────────────────
   streamlit:
     build: .
+    command: streamlit run frontend/app.py --server.address 0.0.0.0 --server.port 8501
     depends_on:
       api:
         condition: service_healthy
-    command: streamlit run frontend/app.py --server.address 0.0.0.0 --server.port 8501
     environment:
       API_URL: http://api:8000
     ports:
@@ -47,3 +106,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:

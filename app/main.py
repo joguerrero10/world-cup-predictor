@@ -1,18 +1,23 @@
 """
-FastAPI application for World Cup Predictor AI.
+FastAPI application — Plataforma de Simulación Futbolística.
 
-Endpoints (per spec):
-    GET  /predict-match
-    GET  /simulate-tournament
-    GET  /team-probabilities
-    GET  /elo-rankings
-    GET  /model-performance
-    POST /retrain
+API v1 (nueva, multicompetición):
+    POST /api/v1/simulation-jobs          — simulación asíncrona
+    GET  /api/v1/simulation-jobs/{id}     — estado del job
+    GET  /api/v1/simulation-jobs/{id}/result
+    GET  /api/v1/predict-match            — predicción 1X2 + marcador
+    GET  /api/v1/predict-player           — probabilidades de jugador
+    GET  /api/v1/predict-season           — temporada completa
+    GET  /api/v1/team-probabilities       — torneo Monte Carlo
+    GET  /api/v1/league-table             — tabla de liga simulada
+    GET  /api/v1/player-probabilities     — distribución de goles
+    GET  /api/v1/discipline-probabilities — tarjetas y disciplina
 
-This wires the verified ML engine to HTTP. It uses an in-memory demo registry so
-the API runs out-of-the-box; in production, swap `STATE` for DB-backed loaders
-(see app/db/models.py). Endpoints that need fitted models check readiness and
-return 409 if the model has not been trained yet — no fabricated outputs.
+API legacy (mantenida para compatibilidad hacia atrás):
+    GET  /predict-match, /simulate-tournament, /team-probabilities
+    GET  /elo-rankings, /model-performance
+    POST /retrain, /load-from-db, /train-form-model, /load-factors
+    GET  /health
 """
 from __future__ import annotations
 
@@ -35,7 +40,6 @@ from app.models.form_model import FormModel, build_features
 import time
 from contextlib import asynccontextmanager
 from sqlalchemy import text
-
 
 import asyncio
 
@@ -82,7 +86,16 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="World Cup Predictor AI", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="Football Simulation Platform",
+    version="1.0.0",
+    description="Plataforma de simulación y predicción de fútbol: Copa del Mundo, ligas europeas, Champions League.",
+    lifespan=lifespan,
+)
+
+# Registrar la API v1
+from app.api.v1.router import v1_router
+app.include_router(v1_router)
 
 
 def _persist_prediction(model: str, p: tuple[float, float, float], extra: dict | None = None) -> None:
