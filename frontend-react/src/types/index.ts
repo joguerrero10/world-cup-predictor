@@ -3,9 +3,13 @@
 export interface HealthStatus {
   status: string
   teams_loaded: number
+  matches_in_db: number
   dc_ready: boolean
-  form_model_ready: boolean
+  xgb_ready: boolean
+  form_model_ready?: boolean   // legacy alias
   klement_factors_loaded: number
+  engine_warm: boolean
+  auto_etl_enabled: boolean
 }
 
 export interface EloTeam {
@@ -30,13 +34,43 @@ export interface MatchPrediction {
   btts_no: number | null
 }
 
+/**
+ * Respuesta unificada del simulador (SimulationResponse del backend).
+ *
+ * Para competiciones de grupos/knockout (fifa_wc_2026, ucl):
+ *   - finalist y semifinalist están poblados
+ *   - top4/top6/relegated son {}
+ *   - extra.group_qualified contiene prob. de clasificar de grupo
+ *
+ * Para ligas domésticas (premier_league, laliga, etc.):
+ *   - finalist y semifinalist son {}
+ *   - top4, top6, relegated están poblados
+ *   - extra.group_qualified es {}
+ */
 export interface TournamentProbs {
-  competition_id: string
+  competition: string
+  competition_name: string
   n_sims: number
+  teams: string[]
+  team_type: "club" | "national"
+  elapsed_seconds: number
+  sims_per_second: number
   champion: Record<string, number>
   finalist: Record<string, number>
   semifinalist: Record<string, number>
-  group_qualified: Record<string, number>
+  top4: Record<string, number>
+  top6: Record<string, number>
+  relegated: Record<string, number>
+  extra: {
+    group_qualified?:    Record<string, number>
+    league_phase_top8?:  Record<string, number>
+    playoff_qual?:       Record<string, number>
+    round_of_16?:        Record<string, number>
+    quarterfinal?:       Record<string, number>
+    expected_group_pts?: Record<string, number>
+    position_probs?:     Record<string, number[]>
+    [key: string]: unknown
+  }
 }
 
 export interface SimulationJobStatus {
@@ -94,9 +128,60 @@ export interface PlayerStat {
   xg_per_90: number | null
   assists_per_90: number | null
   yellow_cards_per_90: number | null
+  overall_rating: number | null
+  minutes_played: number | null
   is_injured: boolean
   is_suspended: boolean
   data_status: "available" | "pending" | "unavailable"
+}
+
+export interface TeamDetail {
+  id: number | null
+  name: string
+  short_name: string | null
+  country: string | null
+  team_type: "club" | "national"
+  competition_id: string | null
+  competition_name: string | null
+  logo_url: string | null
+  stadium: string | null
+  founded_year: number | null
+  market_value_eur: number | null
+  elo_rating: number | null
+  elo_attack: number | null
+  elo_defense: number | null
+  elo_rank: number | null
+}
+
+export interface TransferItem {
+  id: number
+  player: string
+  from_team: string | null
+  to_team: string
+  date: string
+  transfer_type: string
+  fee_eur: number | null
+  fee_display: string
+}
+
+export interface FixtureItem {
+  match_id: number
+  competition: string
+  season: string
+  date: string
+  matchday: number | null
+  round: string | null
+  home_team: string
+  away_team: string
+  venue: string | null
+  status: "FINISHED" | "LIVE" | "SCHEDULED" | "POSTPONED"
+  p_home: number | null
+  p_draw: number | null
+  p_away: number | null
+  expected_goals_home?: number | null
+  expected_goals_away?: number | null
+  home_goals: number | null
+  away_goals: number | null
 }
 
 export interface SystemStats {

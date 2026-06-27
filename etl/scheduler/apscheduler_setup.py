@@ -248,12 +248,62 @@ def create_scheduler(mode: str = "background") -> BackgroundScheduler | Blocking
             replace_existing=True,
         )
 
+    # ── Cada 30 min: fixtures en vivo (hoy ±48h) ─────────────────────────
+    from etl.scheduler.jobs import job_live_fixtures
+    scheduler.add_job(
+        func=job_live_fixtures,
+        trigger=IntervalTrigger(minutes=30),
+        id="live_fixtures",
+        name="Fixtures en vivo",
+        replace_existing=True,
+    )
+
+    # ── Diario (04:00): sync completa ────────────────────────────────────
+    from etl.scheduler.jobs import job_daily_full_sync
+    scheduler.add_job(
+        func=job_daily_full_sync,
+        trigger=CronTrigger(hour=4, minute=0),
+        id="daily_full_sync",
+        name="Sync diaria completa",
+        replace_existing=True,
+    )
+
+    # ── Semanal (lunes 05:00): datos macroeconómicos ─────────────────────
+    from etl.scheduler.jobs import job_macro_weekly
+    scheduler.add_job(
+        func=job_macro_weekly,
+        trigger=CronTrigger(day_of_week="mon", hour=5, minute=0),
+        id="macro_weekly",
+        name="Datos macro semanales",
+        replace_existing=True,
+    )
+
     # ── Semanal (lunes 06:00): ranking FIFA ──────────────────────────────
     scheduler.add_job(
         func=_update_fifa_rankings,
         trigger=CronTrigger(day_of_week="mon", hour=6, minute=0),
         id="fifa_rankings",
         name="Ranking FIFA",
+        replace_existing=True,
+    )
+
+    # ── Semanal (martes 03:00): estadísticas de jugadores ────────────────
+    from etl.scheduler.jobs import job_players_sync
+    scheduler.add_job(
+        func=job_players_sync,
+        trigger=CronTrigger(day_of_week="tue", hour=3, minute=0),
+        id="players_sync",
+        name="Sync jugadores semanal",
+        replace_existing=True,
+    )
+
+    # ── Diario (05:30): fichajes recientes ────────────────────────────────
+    from etl.scheduler.jobs import job_transfers_sync
+    scheduler.add_job(
+        func=job_transfers_sync,
+        trigger=CronTrigger(hour=5, minute=30),
+        id="transfers_sync",
+        name="Sync fichajes diaria",
         replace_existing=True,
     )
 

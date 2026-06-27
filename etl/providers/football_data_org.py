@@ -133,6 +133,8 @@ class FootballDataProvider(BaseProvider):
         self,
         competition_slug: str,
         season: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
     ) -> list[MatchData]:
         code = COMPETITION_CODES.get(competition_slug)
         if not code:
@@ -142,6 +144,10 @@ class FootballDataProvider(BaseProvider):
         params: dict = {"status": "FINISHED"}
         if season:
             params["season"] = season
+        if date_from:
+            params["dateFrom"] = date_from.isoformat()
+        if date_to:
+            params["dateTo"] = date_to.isoformat()
 
         try:
             data = self._get(f"/competitions/{code}/matches", params)

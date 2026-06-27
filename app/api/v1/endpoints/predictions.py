@@ -322,7 +322,23 @@ def team_probabilities(
         a = STATE.elo.get(away, TeamElo())
         return win_draw_loss_probs(h.rating, a.rating, STATE.elo_cfg, neutral)
 
-    teams = sorted(STATE.elo.keys(), key=lambda t: -STATE.elo[t].rating)[:comp.n_teams]
+    # Usar equipos específicos de la competición; si el registry no los devuelve,
+    # caer de vuelta a los N mejores del Elo global.
+    try:
+        from app.core.competition_registry import get_competition_teams
+        registry_teams = [t.name for t in get_competition_teams(competition_id)]
+    except Exception:
+        registry_teams = []
+
+    if registry_teams:
+        # Ordenar por Elo dentro de los equipos de la competición
+        teams = sorted(
+            registry_teams,
+            key=lambda t: -(STATE.elo.get(t, TeamElo()).rating),
+        )[:comp.n_teams]
+    else:
+        teams = sorted(STATE.elo.keys(), key=lambda t: -STATE.elo[t].rating)[:comp.n_teams]
+
     n_per_group = comp.teams_per_group or 4
 
     groups = [
@@ -379,7 +395,19 @@ def league_table(
         a = STATE.elo.get(away, TeamElo())
         return win_draw_loss_probs(h.rating, a.rating, STATE.elo_cfg, neutral)
 
-    teams = sorted(STATE.elo.keys(), key=lambda t: -STATE.elo[t].rating)[:comp.n_teams]
+    try:
+        from app.core.competition_registry import get_competition_teams
+        registry_teams = [t.name for t in get_competition_teams(competition_id)]
+    except Exception:
+        registry_teams = []
+
+    if registry_teams:
+        teams = sorted(
+            registry_teams,
+            key=lambda t: -(STATE.elo.get(t, TeamElo()).rating),
+        )[:comp.n_teams]
+    else:
+        teams = sorted(STATE.elo.keys(), key=lambda t: -STATE.elo[t].rating)[:comp.n_teams]
 
     result = simulate_league(teams=teams, model=model_fn, config=comp, n_sims=n_sims)
 
@@ -420,30 +448,58 @@ def player_probabilities(
     Probabilidades de goles y asistencias para los top N jugadores de un equipo.
     Requiere estadísticas de jugador cargadas vía ETL.
     """
+    from datetime import datetime
     from app.db.database import SessionLocal
     from app.db.models import Player, Team
-    from sqlalchemy import select, desc
+    from sqlalchemy import select, desc, func
 
     with SessionLocal() as db:
-        team_row = db.scalar(select(Team).where(Team.name == team))
+        team_row = db.scalar(select(Team).where(
+            func.lower(Team.name) == team.lower()
+        ))
+
+        # Equipo no encontrado en BD → devolver pending sin 404
         if team_row is None:
-            raise HTTPException(404, f"Equipo no encontrado: {team}")
+            return {
+                "team": team,
+                "players": [],
+                "data_status": "unavailable",
+                "last_synced_at": None,
+                "message": (
+                    f"El equipo '{team}' no está en la base de datos. "
+                    "El ETL sincroniza jugadores semanalmente."
+                ),
+            }
 
         players = list(db.scalars(
             select(Player)
             .where(Player.team_id == team_row.id)
-            .order_by(desc(Player.goals_per_90.nulls_last()))
+            .order_by(
+                Player.goals_per_90.desc().nulls_last(),
+                Player.overall_rating.desc().nulls_last(),
+            )
             .limit(top_n)
         ))
 
+        last_synced = db.scalar(
+            select(func.max(Player.last_synced_at))
+            .where(Player.team_id == team_row.id)
+        )
+
+    # Sin jugadores → pending (el equipo existe pero aún no tiene datos de stats)
     if not players:
         return {
             "team": team,
             "players": [],
             "data_status": "pending",
-            "message": "Sin estadísticas de jugadores. Ejecuta el ETL de jugadores primero.",
+            "last_synced_at": last_synced.isoformat() if last_synced else None,
+            "message": (
+                f"Sin estadísticas de jugadores para '{team}'. "
+                "El ETL sincroniza datos de jugadores semanalmente."
+            ),
         }
 
+    has_stats = any(p.goals_per_90 is not None or p.overall_rating is not None for p in players)
     return {
         "team": team,
         "players": [
@@ -454,13 +510,17 @@ def player_probabilities(
                 "xg_per_90": p.xg_per_90,
                 "assists_per_90": p.assists_per_90,
                 "yellow_cards_per_90": p.yellow_cards_per_90,
+                "overall_rating": p.overall_rating,
+                "minutes_played": p.minutes_played,
                 "is_injured": p.is_injured,
                 "is_suspended": p.is_suspended,
-                "data_status": "available" if p.goals_per_90 is not None else "pending",
+                "data_status": "available" if (p.goals_per_90 is not None or p.overall_rating is not None) else "pending",
             }
             for p in players
         ],
-        "data_status": "partial" if any(p.goals_per_90 is None for p in players) else "available",
+        "data_status": "available" if has_stats else "pending",
+        "last_synced_at": last_synced.isoformat() if last_synced else None,
+        "message": None,
     }
 
 

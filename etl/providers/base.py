@@ -51,6 +51,11 @@ class TeamData:
     avg_temp_c: Optional[float] = None
     is_host: bool = False
     data_source: Optional[str] = None
+    # Campos enriquecidos (clubs + selecciones)
+    logo_url: Optional[str] = None
+    founded_year: Optional[int] = None
+    stadium: Optional[str] = None
+    market_value_eur: Optional[float] = None
 
 
 @dataclass
@@ -156,8 +161,15 @@ class BaseProvider(ABC):
         self,
         competition_slug: str,
         season: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
     ) -> list[MatchData]:
-        """Devuelve partidos finalizados de la competición y temporada dadas."""
+        """
+        Devuelve partidos finalizados de la competición y temporada dadas.
+
+        date_from / date_to: filtros opcionales de rango de fecha (YYYY-MM-DD).
+        Si el proveedor no los soporta los ignora silenciosamente.
+        """
         ...
 
     @abstractmethod

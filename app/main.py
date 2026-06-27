@@ -21,10 +21,16 @@ API legacy (mantenida para compatibilidad hacia atrás):
 """
 from __future__ import annotations
 
+import os
+import time
+from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Literal
 
+import asyncio
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from app.models.elo import EloConfig, TeamElo, win_draw_loss_probs
 from app.models.dixon_coles import DixonColes
@@ -33,55 +39,181 @@ from app.models.hybrid import HybridWeights, blend_smart, form_probs
 from app.models.monte_carlo import Group, simulate
 from app.db.database import init_db, SessionLocal, engine
 from app.db import repositories as repo
-from app.services.bootstrap import build_engine_from_db, build_factors_from_db
+from app.services.bootstrap import (
+    build_engine_from_db,
+    build_factors_from_db,
+    build_full_engine,
+    count_matches,
+)
 from app.services.features import MatchRow, walk_forward
 from app.models.form_model import FormModel, build_features
 
-import time
-from contextlib import asynccontextmanager
-from sqlalchemy import text
 
-import asyncio
+_MIN_MATCHES_FOR_ENGINE = 30    # mínimo para Elo + Dixon-Coles
+_MIN_MATCHES_FOR_ETL = 100      # por debajo de esto lanzamos ETL inicial
 
 
 async def _warm_start():
-    """Reconstruye Elo + Dixon-Coles + factores Klement en segundo plano.
-    La API responde /health de inmediato; los modelos quedan listos en ~60s."""
+    """
+    Reconstruye el engine (Elo + DC + XGBoost + Klement) desde la BD.
+
+    Si la BD tiene < _MIN_MATCHES_FOR_ETL partidos, lanza el ETL histórico
+    en segundo plano y arranca con los datos disponibles mientras.
+
+    La API responde /health de inmediato; el engine queda listo en 10-60s.
+    """
     await asyncio.sleep(3)
     try:
         t0 = time.time()
         with SessionLocal() as db:
-            elo, dc, n = build_engine_from_db(db)
+            n_stored = count_matches(db)
+
+        print(
+            f"[warm-start] BD tiene {n_stored} partidos finalizados.",
+            flush=True,
+        )
+
+        if n_stored < _MIN_MATCHES_FOR_ETL:
+            print(
+                f"[warm-start] < {_MIN_MATCHES_FOR_ETL} partidos. "
+                "Lanzando ETL histórico en background...",
+                flush=True,
+            )
+            asyncio.create_task(_run_initial_etl())
+
+        # Construir engine con lo que haya ahora (puede estar vacío)
+        if n_stored >= _MIN_MATCHES_FOR_ENGINE:
+            with SessionLocal() as db:
+                elo, dc, form_model, n = build_full_engine(db)
+                elo_ratings = {name: e.rating for name, e in elo.items()}
+                factors = build_factors_from_db(db, elo_ratings)
+
+            STATE.elo = elo
+            STATE.dc = dc
+            if form_model is not None:
+                STATE.form_model = form_model
+            if factors:
+                STATE.factors = factors
+
+            print(
+                f"[warm-start] Engine caliente: {n} partidos, {len(elo)} equipos, "
+                f"DC={'OK' if dc else '-'}, XGB={'OK' if form_model else '-'}, "
+                f"Klement={len(factors)} — {time.time()-t0:.1f}s",
+                flush=True,
+            )
+        else:
+            print(
+                f"[warm-start] Engine mínimo ({n_stored} partidos). "
+                "Esperando ETL para reconstruir engine completo.",
+                flush=True,
+            )
+
+    except Exception as exc:
+        print(f"[warm-start] error: {exc}", flush=True)
+
+
+async def _run_initial_etl() -> None:
+    """
+    Lanza el ETL histórico completo en segundo plano al arrancar.
+
+    Respeta AUTO_ETL_ON_STARTUP y ETL_HISTORICAL_SEASONS.
+    Tras completar, reconstruye el engine automáticamente.
+    """
+    if os.getenv("AUTO_ETL_ON_STARTUP", "true").lower() != "true":
+        print("[etl-startup] AUTO_ETL_ON_STARTUP=false — saltando.", flush=True)
+        return
+
+    seasons_back = int(os.getenv("ETL_HISTORICAL_SEASONS", "3"))
+    current_year = datetime.now().year
+    seasons = list(range(current_year - seasons_back + 1, current_year + 1))
+
+    competitions = [
+        "premier_league", "laliga", "bundesliga",
+        "serie_a", "ligue_1", "ucl",
+    ]
+
+    print(
+        f"[etl-startup] Iniciando carga histórica: {len(competitions)} competiciones "
+        f"× {seasons_back} temporadas {seasons}",
+        flush=True,
+    )
+
+    try:
+        # Importación tardía para no bloquear el arranque si el módulo ETL falla
+        from etl.pipeline.orchestrator import ETLPipeline
+
+        pipeline = ETLPipeline()
+        total_inserted = 0
+
+        for comp in competitions:
+            for season in seasons:
+                print(f"[etl-startup] {comp} / {season}...", flush=True)
+                try:
+                    reports = pipeline.sync_competition(
+                        comp,
+                        data_types=["teams", "matches", "standings"],
+                        season=season,
+                    )
+                    for r in reports:
+                        total_inserted += r.records_inserted
+                        if r.status != "completed":
+                            print(
+                                f"[etl-startup] ⚠ {comp}/{season}/{r.data_type}: "
+                                f"{r.status} — {r.errors[:2]}",
+                                flush=True,
+                            )
+                except Exception as exc:
+                    print(f"[etl-startup] Error {comp}/{season}: {exc}", flush=True)
+
+        print(
+            f"[etl-startup] ETL completado. {total_inserted} partidos insertados. "
+            "Reconstruyendo engine...",
+            flush=True,
+        )
+
+        # Reconstruir engine con los datos recién cargados
+        with SessionLocal() as db:
+            elo, dc, form_model, n = build_full_engine(db)
             elo_ratings = {name: e.rating for name, e in elo.items()}
             factors = build_factors_from_db(db, elo_ratings)
-        if n > 0:
-            STATE.elo, STATE.dc = elo, dc
+
+        STATE.elo = elo
+        STATE.dc = dc
+        if form_model is not None:
+            STATE.form_model = form_model
         if factors:
             STATE.factors = factors
-        print(f"[warm-start] {n} partidos, {len(elo)} equipos, "
-              f"{len(factors)} factores Klement — {time.time()-t0:.1f}s", flush=True)
-    except Exception as e:
-        print(f"[warm-start] error: {e}", flush=True)
+
+        print(
+            f"[etl-startup] Engine listo: {n} partidos, {len(elo)} equipos, "
+            f"XGB={'OK' if form_model else '-'}",
+            flush=True,
+        )
+
+    except Exception as exc:
+        print(f"[etl-startup] Error fatal en ETL inicial: {exc}", flush=True)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Espera a que Postgres acepte conexiones (reintentos)
+    # Espera a que Postgres acepte conexiones (hasta 60s)
     last_err = None
-    for _ in range(20):
+    for attempt in range(30):
         try:
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
             init_db()
             last_err = None
+            print(f"[startup] BD conectada (intento {attempt + 1})", flush=True)
             break
-        except Exception as e:
-            last_err = e
+        except Exception as exc:
+            last_err = exc
             time.sleep(2)
     if last_err is not None:
-        print(f"[startup] DB no disponible tras reintentos: {last_err}", flush=True)
+        print(f"[startup] BD no disponible tras 30 intentos: {last_err}", flush=True)
 
-    # Lanza el warm-start en background: la API ya responde /health
+    # Warm-start en background → API responde /health inmediatamente
+    # Si hay pocos datos, _warm_start lanza el ETL histórico como segunda tarea
     asyncio.create_task(_warm_start())
     yield
 
@@ -375,7 +507,18 @@ def load_factors():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "teams_loaded": len(STATE.elo),
-            "dc_ready": STATE.dc is not None and STATE.dc.params is not None,
-            "form_model_ready": STATE.form_model is not None,
-            "klement_factors_loaded": len(STATE.factors)}
+    with SessionLocal() as db:
+        try:
+            n_matches = count_matches(db)
+        except Exception:
+            n_matches = -1
+    return {
+        "status": "ok",
+        "teams_loaded": len(STATE.elo),
+        "matches_in_db": n_matches,
+        "dc_ready": STATE.dc is not None and STATE.dc.params is not None,
+        "xgb_ready": STATE.form_model is not None,
+        "klement_factors_loaded": len(STATE.factors),
+        "engine_warm": len(STATE.elo) > 0,
+        "auto_etl_enabled": os.getenv("AUTO_ETL_ON_STARTUP", "true").lower() == "true",
+    }

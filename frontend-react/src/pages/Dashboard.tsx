@@ -8,7 +8,7 @@ import { StatCard } from "../components/ui/StatCard"
 import { Badge, StatusBadge } from "../components/ui/Badge"
 import { CardSkeleton } from "../components/ui/LoadingSkeleton"
 import { PlotlyChart } from "../components/ui/PlotlyChart"
-import { fetchHealth, fetchSystemStats, fetchEloRankings } from "../api/endpoints"
+import { fetchHealth, fetchSystemStats, fetchEloRankings, fetchModelMetrics } from "../api/endpoints"
 import type { Data } from "plotly.js"
 
 export function Dashboard() {
@@ -29,6 +29,13 @@ export function Dashboard() {
     queryKey: ["elo-rankings"],
     queryFn: fetchEloRankings,
     staleTime: 60_000,
+  })
+
+  const { data: metrics } = useQuery({
+    queryKey: ["model-metrics"],
+    queryFn: fetchModelMetrics,
+    staleTime: 5 * 60_000,
+    retry: false,
   })
 
   const loading = hLoading || sLoading
@@ -277,6 +284,71 @@ export function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Model metrics card */}
+      {(metrics?.stored.length || Object.keys(metrics?.live ?? {}).length) ? (
+        <div className="card space-y-3">
+          <div>
+            <p className="section-label">Evaluación</p>
+            <h3 className="section-title text-xl">MÉTRICAS DEL MODELO</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Live metrics */}
+            {Object.entries(metrics?.live ?? {}).length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-wider text-muted">En tiempo real</p>
+                {Object.entries(metrics!.live).map(([model, m]) => (
+                  <div key={model} className="flex items-center justify-between py-1.5 border-b border-border/40 last:border-0">
+                    <span className="text-sm font-mono text-cyan uppercase">{model}</span>
+                    <div className="flex gap-3 text-xs text-muted">
+                      {m.accuracy != null && (
+                        <span>
+                          Acc <span className="text-text font-mono">{(m.accuracy * 100).toFixed(1)}%</span>
+                        </span>
+                      )}
+                      {m.brier_score != null && (
+                        <span>
+                          Brier <span className="text-text font-mono">{m.brier_score.toFixed(3)}</span>
+                        </span>
+                      )}
+                      <span className="text-border">n={m.n_evaluated}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Stored metrics */}
+            {metrics?.stored.length ? (
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-wider text-muted">Guardadas en BD</p>
+                {metrics.stored.slice(0, 5).map((m, i) => (
+                  <div key={i} className="flex items-center justify-between py-1.5 border-b border-border/40 last:border-0">
+                    <span className="text-sm font-mono text-amber uppercase">{m.model}</span>
+                    <div className="flex gap-3 text-xs text-muted">
+                      {m.accuracy != null && (
+                        <span>
+                          Acc <span className="text-text font-mono">{(m.accuracy * 100).toFixed(1)}%</span>
+                        </span>
+                      )}
+                      {m.brier_score != null && (
+                        <span>
+                          Brier <span className="text-text font-mono">{m.brier_score.toFixed(3)}</span>
+                        </span>
+                      )}
+                      {m.evaluated_at && (
+                        <span className="text-border">{new Date(m.evaluated_at).toLocaleDateString("es-ES")}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          {metrics?.note && (
+            <p className="text-xs text-muted/60 italic">{metrics.note}</p>
+          )}
+        </div>
+      ) : null}
 
       {/* Last updated */}
       <div className="text-center text-xs text-muted/50">

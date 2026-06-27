@@ -519,3 +519,83 @@ def _answer_chat(msg_lower: str, original_msg: str, S, elo_sorted, top5, bottom5
         f"¿Qué quieres saber? Por ejemplo: '¿Quién ganará el Mundial?', '¿Cuál tiene mejor defensa?', "
         f"'¿Cómo funciona el modelo híbrido?'"
     )
+
+
+# ─── Model Metrics ────────────────────────────────────────────────────────────
+
+@router.get("/model-metrics")
+def model_metrics():
+    """
+    Métricas de evaluación del modelo: Brier score, log-loss, accuracy.
+
+    Combina métricas almacenadas en BD con cálculo en vivo de predicciones
+    contra resultados reales disponibles.
+    """
+    from app.db.database import SessionLocal
+    from app.db import repositories as repo
+
+    stored: list[dict] = []
+    live: dict = {}
+
+    try:
+        with SessionLocal() as db:
+            rows = repo.latest_metrics(db)
+            stored = [
+                {
+                    "model":        m.model,
+                    "accuracy":     m.accuracy,
+                    "brier_score":  m.brier_score,
+                    "log_loss":     m.log_loss,
+                    "evaluated_at": m.evaluated_at.isoformat() if m.evaluated_at else None,
+                }
+                for m in rows
+            ]
+
+            # Cálculo en vivo desde predicciones vs resultados reales
+            from sqlalchemy import select, func, case
+            from app.db.models import Prediction, Match
+
+            # Predicciones ligadas a partidos con resultado
+            q = (
+                select(
+                    Prediction.model,
+                    func.count(Prediction.id).label("n"),
+                    func.avg(
+                        case(
+                            (Match.home_goals > Match.away_goals, (1 - Prediction.p_home) ** 2 + Prediction.p_draw ** 2 + Prediction.p_away ** 2),
+                            (Match.home_goals < Match.away_goals, Prediction.p_home ** 2 + Prediction.p_draw ** 2 + (1 - Prediction.p_away) ** 2),
+                            else_=Prediction.p_home ** 2 + (1 - Prediction.p_draw) ** 2 + Prediction.p_away ** 2,
+                        )
+                    ).label("brier"),
+                    func.avg(
+                        case(
+                            (Match.home_goals > Match.away_goals, case((Prediction.p_home >= 0.5, 1), else_=0)),
+                            (Match.home_goals < Match.away_goals, case((Prediction.p_away >= 0.5, 1), else_=0)),
+                            else_=case((Prediction.p_draw >= 0.5, 1), else_=0),
+                        )
+                    ).label("accuracy"),
+                )
+                .join(Match, Match.id == Prediction.match_id)
+                .where(Match.home_goals.isnot(None))
+                .group_by(Prediction.model)
+            )
+            live_rows = db.execute(q).all()
+            live = {
+                row.model: {
+                    "n_evaluated":  row.n,
+                    "brier_score":  round(float(row.brier), 4) if row.brier else None,
+                    "accuracy":     round(float(row.accuracy), 4) if row.accuracy else None,
+                }
+                for row in live_rows
+            }
+    except Exception as exc:
+        return {"stored": stored, "live": {}, "error": str(exc)}
+
+    return {
+        "stored":  stored,
+        "live":    live,
+        "note": (
+            "stored: métricas guardadas manualmente tras reentrenamiento. "
+            "live: calculadas en tiempo real sobre predicciones con resultado disponible."
+        ),
+    }

@@ -183,43 +183,109 @@ def _run_simulation(
     seed,
     db,
 ) -> SimulationResponse:
-    """Ejecuta la simulación apropiada según el tipo de competición."""
+    """
+    Ejecuta la simulación apropiada según el tipo de competición y normaliza
+    la respuesta a un SimulationResponse uniforme.
+
+    Cada simulador devuelve un dataclass distinto (WorldCupResult, UCLResult,
+    LeagueResult). Este método mapea los campos específicos al esquema común.
+    """
     cfg = get_competition(comp_id)
     team_names = get_team_names(comp_id, season, db)
 
     if not team_names:
         raise HTTPException(status_code=409, detail=f"Sin equipos para '{comp_id}'")
 
-    from app.core.competition_registry import get_team_type, TeamType
+    from app.core.competition_registry import get_team_type
     team_type = get_team_type(comp_id)
 
-    # Seleccionar simulador según tipo de competición
+    # ── Mundial 2026 ───────────────────────────────────────────────────────
     if comp_id == "fifa_wc_2026":
         from app.simulation.world_cup_simulator import WorldCupSimulator
-        sim = WorldCupSimulator(model=model_fn, season=season or 2026, db=db)
-        res = sim.run(n_sims=n_sims, seed=seed)
-
-    elif comp_id == "ucl":
-        from app.simulation.champions_league_simulator import ChampionsLeagueSimulator
-        sim = ChampionsLeagueSimulator(model=model_fn, season=season or 2025, db=db)
-        res = sim.run(n_sims=n_sims, seed=seed)
-
-    elif cfg.competition_type == CompetitionType.LEAGUE:
-        from app.simulation.league_simulator import LeagueSimulator
-        sim = LeagueSimulator(
-            competition_id=comp_id,
-            model=model_fn,
-            season=season,
-            db=db,
+        res = WorldCupSimulator(model=model_fn, season=season or 2026, db=db).run(
+            n_sims=n_sims, seed=seed
         )
-        res = sim.run(n_sims=n_sims, seed=seed)
+        return SimulationResponse(
+            competition=comp_id,
+            competition_name=cfg.name,
+            n_sims=res.n_sims,
+            teams=list(res.champion.keys()),
+            team_type=team_type.value,
+            elapsed_seconds=round(res.elapsed_seconds, 2),
+            sims_per_second=round(res.sims_per_second, 0),
+            champion=res.champion,
+            finalist=res.finalist,
+            semifinalist=res.semifinalist,
+            top4={},
+            top6={},
+            relegated={},
+            extra={
+                "group_qualified":    res.group_qualified,
+                "round_of_16":        res.round_of_16,
+                "quarterfinal":       res.quarterfinal,
+                "expected_group_pts": res.expected_group_pts,
+            },
+        )
 
-    else:
-        # Knockout genérico
-        from app.simulation.world_cup_simulator import WorldCupSimulator
-        sim = WorldCupSimulator(model=model_fn, db=db)
-        res = sim.run(n_sims=n_sims, seed=seed)
+    # ── Champions League ───────────────────────────────────────────────────
+    if comp_id == "ucl":
+        from app.simulation.champions_league_simulator import ChampionsLeagueSimulator
+        res = ChampionsLeagueSimulator(model=model_fn, season=season or 2025, db=db).run(
+            n_sims=n_sims, seed=seed
+        )
+        return SimulationResponse(
+            competition=comp_id,
+            competition_name=cfg.name,
+            n_sims=res.n_sims,
+            teams=list(res.champion.keys()),
+            team_type=team_type.value,
+            elapsed_seconds=round(res.elapsed_seconds, 2),
+            sims_per_second=round(res.sims_per_second, 0),
+            champion=res.champion,
+            finalist=res.finalist,
+            semifinalist=res.semifinalist,
+            top4={},
+            top6={},
+            relegated={},
+            extra={
+                # group_qualified = alias de league_phase_top8 para el frontend
+                "group_qualified":    res.league_phase_top8,
+                "league_phase_top8":  res.league_phase_top8,
+                "playoff_qual":       res.playoff_qual,
+                "round_of_16":        res.round_of_16,
+                "quarterfinal":       res.quarterfinal,
+            },
+        )
 
+    # ── Ligas domésticas ──────────────────────────────────────────────────
+    if cfg.competition_type == CompetitionType.LEAGUE:
+        from app.simulation.league_simulator import LeagueSimulator
+        res = LeagueSimulator(
+            competition_id=comp_id, model=model_fn, season=season, db=db
+        ).run(n_sims=n_sims, seed=seed)
+        return SimulationResponse(
+            competition=comp_id,
+            competition_name=cfg.name,
+            n_sims=res.n_sims,
+            teams=list(res.champion.keys()),
+            team_type=team_type.value,
+            elapsed_seconds=round(res.elapsed_seconds, 2),
+            sims_per_second=round(res.sims_per_second, 0),
+            champion=res.champion,
+            finalist={},
+            semifinalist={},
+            top4=res.top4,
+            top6=getattr(res, "top6", {}),
+            relegated=res.relegated,
+            extra={
+                "group_qualified": {},
+                "position_probs":  getattr(res, "position_probs", {}),
+            },
+        )
+
+    # ── Knockout genérico (fallback) ──────────────────────────────────────
+    from app.simulation.world_cup_simulator import WorldCupSimulator
+    res = WorldCupSimulator(model=model_fn, db=db).run(n_sims=n_sims, seed=seed)
     return SimulationResponse(
         competition=comp_id,
         competition_name=cfg.name,
@@ -231,10 +297,10 @@ def _run_simulation(
         champion=res.champion,
         finalist=res.finalist,
         semifinalist=res.semifinalist,
-        top4=res.top4,
-        top6=res.top6,
-        relegated=res.relegated,
-        extra=res.extra,
+        top4={},
+        top6={},
+        relegated={},
+        extra={"group_qualified": getattr(res, "group_qualified", {})},
     )
 
 

@@ -19,10 +19,12 @@ export function Players() {
   const { data: elo } = useQuery({ queryKey: ["elo-rankings"], queryFn: fetchEloRankings, staleTime: 60_000 })
   const teams = elo?.map(t => t.team).sort() ?? []
 
-  const { data: playersData, isLoading } = useQuery({
+  const { data: playersData, isLoading, isError } = useQuery({
     queryKey: ["players", selectedTeam],
     queryFn: () => fetchPlayers(selectedTeam, 50),
     enabled: !!selectedTeam,
+    retry: false,
+    staleTime: 30_000,
   })
 
   const players = (playersData?.players ?? [])
@@ -90,9 +92,22 @@ export function Players() {
       </div>
 
       {/* Status banner */}
-      {playersData?.data_status === "pending" && selectedTeam && (
-        <div className="card border-amber/20 bg-amber/5 text-amber text-sm p-4">
-          Los datos de jugadores para <strong>{selectedTeam}</strong> están pendientes. Ejecuta el ETL de jugadores para cargar estadísticas.
+      {isError && selectedTeam && (
+        <div className="card border-scarlet/20 bg-scarlet/5 text-scarlet text-sm p-4">
+          Error cargando jugadores de <strong>{selectedTeam}</strong>. Verifica que el servicio esté activo.
+        </div>
+      )}
+      {!isError && playersData?.data_status !== "available" && selectedTeam && !isLoading && (
+        <div className="card border-amber/20 bg-amber/5 text-amber text-sm p-4 space-y-1">
+          <p>
+            {playersData?.message
+              ?? `Sin estadísticas de jugadores para ${selectedTeam}. El ETL sincroniza jugadores semanalmente.`}
+          </p>
+          {playersData?.last_synced_at && (
+            <p className="text-xs opacity-70">
+              Última sincronización: {new Date(playersData.last_synced_at).toLocaleString("es-ES")}
+            </p>
+          )}
         </div>
       )}
 
@@ -206,10 +221,16 @@ export function Players() {
               </div>
             </>
           ) : (
-            !isLoading && (
+            !isLoading && !isError && (
               <div className="text-center py-12 text-muted">
-                <p className="text-sm">No hay jugadores disponibles para {selectedTeam}</p>
-                <p className="text-xs mt-1">Los datos de jugadores requieren carga vía ETL</p>
+                <User className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                <p className="text-sm">Sin jugadores disponibles para <strong>{selectedTeam}</strong></p>
+                <p className="text-xs mt-1">El ETL sincroniza estadísticas de jugadores semanalmente.</p>
+                {playersData?.last_synced_at && (
+                  <p className="text-xs mt-0.5 opacity-60">
+                    Última sync: {new Date(playersData.last_synced_at).toLocaleString("es-ES")}
+                  </p>
+                )}
               </div>
             )
           )}

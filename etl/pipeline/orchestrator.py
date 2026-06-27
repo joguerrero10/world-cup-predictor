@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import date as _date
 from datetime import datetime
 from typing import Optional
 
@@ -165,15 +166,31 @@ class ETLPipeline:
     def sync_all(
         self,
         data_types: Optional[list[str]] = None,
-        season: Optional[int] = None,
+        seasons_back: int = 3,
     ) -> dict[str, list[SyncReport]]:
-        """Sincroniza todas las competiciones configuradas."""
+        """
+        Sincroniza todas las competiciones de las últimas `seasons_back` temporadas.
+
+        Ejemplo con seasons_back=3 y año actual 2026:
+            → sincroniza temporadas 2024, 2025, 2026 para cada competición.
+        """
+        current_year = _date.today().year
+        seasons = list(range(current_year - seasons_back + 1, current_year + 1))
+
         all_reports: dict[str, list[SyncReport]] = {}
         for slug in SYNC_COMPETITIONS:
-            logger.info("Sincronizando competición: %s", slug)
-            all_reports[slug] = self.sync_competition(slug, data_types, season)
+            slug_reports: list[SyncReport] = []
+            for season in seasons:
+                logger.info("Sincronizando %s / temporada %s", slug, season)
+                try:
+                    reports = self.sync_competition(
+                        slug, data_types or ["teams", "matches", "standings"], season
+                    )
+                    slug_reports.extend(reports)
+                except Exception as exc:
+                    logger.error("Error sync %s/%s: %s", slug, season, exc)
+            all_reports[slug] = slug_reports
 
-        # Sincronizar datos macro (World Bank) una vez para todos los equipos
         macro_report = self._sync_macro()
         all_reports["_macro"] = [macro_report]
 
@@ -362,11 +379,15 @@ class ETLPipeline:
         updated = 0
         for t in valid_teams:
             fields = {k: v for k, v in {
-                "country": t.country,
-                "confederation": t.confederation,
-                "short_name": t.short_name,
-                "is_host": t.is_host,
-                "data_source": t.data_source,
+                "country":         t.country,
+                "confederation":   t.confederation,
+                "short_name":      t.short_name,
+                "is_host":         t.is_host,
+                "data_source":     t.data_source,
+                "logo_url":        t.logo_url,
+                "founded_year":    t.founded_year,
+                "stadium":         t.stadium,
+                "market_value_eur": t.market_value_eur,
             }.items() if v is not None}
             repo.upsert_team(db, t.name, **fields)
             updated += 1
@@ -403,21 +424,34 @@ class ETLPipeline:
 
         ids = repo.team_id_map(db)
         inserted = 0
+        from datetime import datetime as dt_cls
         for p in valid_players:
             if p.team_name not in ids:
                 team = repo.upsert_team(db, p.team_name, data_source="etl_auto")
                 ids[p.team_name] = team.id
 
-            from datetime import datetime as dt_cls
+            # Pasar todas las estadísticas disponibles — no solo datos básicos
+            stats_fields = {k: v for k, v in {
+                "position":           p.position,
+                "nationality":        p.nationality,
+                "birth_date":         p.birth_date,
+                "data_source":        p.data_source,
+                "last_synced_at":     dt_cls.utcnow(),
+                "goals_per_90":       p.goals_per_90,
+                "assists_per_90":     p.assists_per_90,
+                "xg_per_90":          p.xg_per_90,
+                "minutes_played":     p.minutes_played,
+                "yellow_cards_per_90":p.yellow_cards_per_90,
+                "red_cards_per_90":   p.red_cards_per_90,
+                "overall_rating":     p.overall_rating,
+                "market_value_eur":   p.market_value_eur,
+            }.items() if v is not None}
+
             repo.upsert_player(
                 db,
                 team_id=ids[p.team_name],
                 name=p.name,
-                position=p.position,
-                nationality=p.nationality,
-                birth_date=p.birth_date,
-                data_source=p.data_source,
-                last_synced_at=dt_cls.utcnow(),
+                **stats_fields,
             )
             inserted += 1
 
@@ -522,17 +556,54 @@ class ETLPipeline:
     # ------------------------------------------------------------------
 
     def _trigger_retrain(self) -> None:
-        """Llama a load-from-db vía HTTP interno para reentrenar los modelos."""
+        """
+        Reentrenar modelos tras una actualización de datos.
+
+        Estrategia:
+          1. Intento in-process: importa STATE desde app.main y reconstruye
+             Elo + Dixon-Coles + XGBoost directamente (funciona cuando el
+             scheduler corre en el mismo proceso que la API).
+          2. Fallback HTTP: POST /load-from-db al servidor API (funciona
+             cuando el scheduler corre en un proceso/contenedor separado).
+        """
+        try:
+            from app.main import STATE                          # noqa: PLC0415
+            from app.services.bootstrap import build_full_engine, build_factors_from_db
+
+            with SessionLocal() as db:
+                elo, dc, form_model, n = build_full_engine(db)
+                elo_ratings = {name: e.rating for name, e in elo.items()}
+                factors = build_factors_from_db(db, elo_ratings)
+
+            STATE.elo = elo
+            STATE.dc = dc
+            if form_model is not None:
+                STATE.form_model = form_model
+            if factors:
+                STATE.factors = factors
+
+            logger.info("[retrain] In-process: %d partidos, %d equipos, XGBoost=%s",
+                        n, len(elo), form_model is not None)
+
+        except (ImportError, AttributeError):
+            # Scheduler en proceso separado → HTTP
+            self._trigger_retrain_http()
+
+        except Exception as exc:
+            logger.warning("[retrain] In-process falló (%s), intentando HTTP...", exc)
+            self._trigger_retrain_http()
+
+    def _trigger_retrain_http(self) -> None:
         import os
         import requests as req
 
         api_url = os.getenv("API_URL", "http://localhost:8000")
         try:
-            resp = req.post(f"{api_url}/load-from-db", timeout=120)
+            resp = req.post(f"{api_url}/load-from-db", timeout=60)
             resp.raise_for_status()
-            logger.info("Reentrenamiento completado: %s", resp.json())
+            logger.info("[retrain] HTTP OK: %s", resp.json())
         except Exception as exc:
-            logger.warning("Reentrenamiento falló (no crítico): %s", exc)
+            logger.warning("[retrain] HTTP falló (no crítico): %s", exc)
 
 
 # ---------------------------------------------------------------------------

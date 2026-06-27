@@ -87,13 +87,7 @@ def get_transfers(
     rows = db.execute(stmt).all()
 
     if not rows:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "Sin fichajes en la BD. "
-                "Ejecuta el ETL para cargar datos reales: POST /update-data"
-            ),
-        )
+        return []
 
     # Mapear from_team (puede ser None si era free agent)
     from_team_ids = [r.Transfer.from_team_id for r in rows if r.Transfer.from_team_id]

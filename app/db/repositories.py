@@ -165,13 +165,99 @@ def match_exists(
     ) is not None
 
 
+def find_match(
+    db: Session,
+    home_id: int,
+    away_id: int,
+    match_date: date,
+) -> "Match | None":
+    """Devuelve el Match si existe, None si no."""
+    return db.scalar(
+        select(Match).where(
+            and_(
+                Match.home_team == home_id,
+                Match.away_team == away_id,
+                Match.match_date == match_date,
+            )
+        )
+    )
+
+
+def update_match_result(
+    db: Session,
+    match: "Match",
+    home_goals: int,
+    away_goals: int,
+    home_xg: Optional[float] = None,
+    away_xg: Optional[float] = None,
+) -> "Match":
+    """Actualiza el resultado de un partido SCHEDULED → FINISHED."""
+    match.home_goals = home_goals
+    match.away_goals = away_goals
+    if home_xg is not None:
+        match.home_xg = home_xg
+    if away_xg is not None:
+        match.away_xg = away_xg
+    db.flush()
+    return match
+
+
+def find_or_create_season(
+    db: Session,
+    competition_slug: str,
+    year: int,
+) -> Optional[int]:
+    """
+    Devuelve season.id para la competición y año dados.
+    Crea Competition y Season en BD si no existen.
+    """
+    from sqlalchemy import select as _sel
+    from app.db.models import Competition as Comp, Season as Seas
+    from app.models.competition import COMPETITIONS
+
+    comp_row = db.scalar(_sel(Comp).where(Comp.slug == competition_slug))
+    if comp_row is None:
+        cfg = COMPETITIONS.get(competition_slug)
+        if cfg is None:
+            return None
+        comp_row = Comp(
+            slug=competition_slug,
+            name=cfg.name,
+            competition_type=cfg.competition_type.value,
+            tier=cfg.tier.value,
+            country=getattr(cfg, "country", None),
+            n_teams=cfg.n_teams,
+            relegation_spots=cfg.relegation_spots,
+            ucl_spots=cfg.ucl_spots,
+        )
+        db.add(comp_row)
+        db.flush()
+
+    season_row = db.scalar(
+        _sel(Seas).where(
+            and_(Seas.competition_id == comp_row.id, Seas.year_start == year)
+        )
+    )
+    if season_row is None:
+        season_row = Seas(
+            competition_id=comp_row.id,
+            year_start=year,
+            year_end=year + 1,
+            status="active",
+        )
+        db.add(season_row)
+        db.flush()
+
+    return season_row.id
+
+
 def add_match_full(
     db: Session,
     match_date: date,
     home_id: int,
     away_id: int,
-    home_goals: int,
-    away_goals: int,
+    home_goals: Optional[int] = None,   # None = partido no jugado / programado
+    away_goals: Optional[int] = None,
     match_type: str = "friendly",
     neutral: bool = False,
     matchday: Optional[int] = None,

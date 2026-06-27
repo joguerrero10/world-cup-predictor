@@ -110,6 +110,11 @@ class Team(Base):
     football_culture: Mapped[float | None] = mapped_column(Float, nullable=True)
     avg_temp_c: Mapped[float | None] = mapped_column(Float, nullable=True)
     is_host: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Datos club/selección
+    logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    founded_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stadium: Mapped[str | None] = mapped_column(String, nullable=True)
+    market_value_eur: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Metadatos de sincronización
     data_source: Mapped[str | None] = mapped_column(String, nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

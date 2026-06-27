@@ -60,61 +60,49 @@ def create_simulation_job(
         },
     )
 
+    # Capturar IDs antes de pasar al closure para evitar referencias a objetos ORM
+    _job_id = job.id
+    _competition_id = req.competition_id
+    _n_sims = req.n_sims
+    _model = req.model or "hybrid"
+
     def _simulate(job_id: int) -> dict:
-        """Función que ejecuta la simulación real en el worker."""
-        from app.simulation.monte_carlo_fast import simulate_fast, CompetitionGroup
-        from app.models.competition import get_competition
+        """
+        Ejecuta la simulación usando el simulador correcto para cada competición.
+
+        Delega a simulate_v2._run_simulation que ya tiene el dispatch correcto:
+          - fifa_wc_2026  → WorldCupSimulator (48 selecciones, 12 grupos)
+          - ucl           → ChampionsLeagueSimulator (36 clubes, fase de liga)
+          - premier_league/laliga/etc → LeagueSimulator (round-robin)
+        """
         from app.db.database import SessionLocal
+        from app.db.models import SimulationJob
+        from app.api.v1.endpoints.simulate_v2 import _build_model_fn, _run_simulation
 
         with SessionLocal() as wdb:
-            j = wdb.get(type(job), job_id)
-            cfg = j.config or {}
-            competition_cfg = get_competition(j.competition_id)
+            j = wdb.get(SimulationJob, job_id)
+            if j is None:
+                raise ValueError(f"Job {job_id} no encontrado en la BD")
 
-        # Construir el modelo de predicción desde el STATE global del API
-        from app.main import STATE
-        from app.models.elo import win_draw_loss_probs
+            competition_id = j.competition_id
+            n_sims         = j.n_sims
+            model_name     = j.model_name or "hybrid"
+            season         = (j.config or {}).get("season")
+            seed           = (j.config or {}).get("seed")
 
-        def model_fn(home: str, away: str, neutral: bool):
-            if home in STATE.elo and away in STATE.elo:
-                return win_draw_loss_probs(
-                    STATE.elo[home].rating, STATE.elo[away].rating,
-                    STATE.elo_cfg, neutral
-                )
-            return (1/3, 1/3, 1/3)
+            model_fn   = _build_model_fn(competition_id, wdb, model_name)
+            sim_result = _run_simulation(
+                comp_id=competition_id,
+                n_sims=n_sims,
+                season=season,
+                model_fn=model_fn,
+                seed=seed,
+                db=wdb,
+            )
 
-        # Grupos: usar configuración del request o crear grupos automáticos
-        teams_list = cfg.get("teams") or sorted(STATE.elo.keys())
-        groups_cfg = cfg.get("groups")
+        return sim_result.model_dump()
 
-        if groups_cfg:
-            groups = [
-                CompetitionGroup(name=gname, teams=gteams)
-                for gname, gteams in groups_cfg.items()
-            ]
-        else:
-            n = len(teams_list)
-            n_per_group = competition_cfg.teams_per_group or 4
-            groups = [
-                CompetitionGroup(
-                    name=str(i // n_per_group + 1),
-                    teams=teams_list[i:i + n_per_group]
-                )
-                for i in range(0, n - n % n_per_group, n_per_group)
-            ]
-
-        if not groups:
-            raise ValueError("No hay suficientes equipos para formar grupos.")
-
-        result = simulate_fast(
-            groups=groups,
-            model=model_fn,
-            n_sims=j.n_sims,
-            advance_per_group=competition_cfg.advance_per_group or 2,
-        )
-        return result.to_dict()
-
-    submit_job(job_id=job.id, simulate_fn=_simulate, db_factory=SessionLocal)
+    submit_job(job_id=_job_id, simulate_fn=_simulate, db_factory=SessionLocal)
 
     return _job_to_status(job)
 

@@ -1,10 +1,12 @@
 """
-Rebuild the in-memory engine (Elo + Dixon-Coles) from matches stored in the DB.
+Rebuild the in-memory engine (Elo + Dixon-Coles + XGBoost) from matches stored in the DB.
 
 Lets the API start "warm": instead of requiring POST /retrain after every restart,
 the service replays the stored match history on startup.
 """
 from __future__ import annotations
+
+import logging
 
 from sqlalchemy.orm import Session
 
@@ -14,6 +16,17 @@ from app.models.dixon_coles import DixonColes
 from app.models.elo import EloConfig, TeamElo, update_match
 from app.models.klement import TeamFactors
 from app.services.features import MatchRow
+
+logger = logging.getLogger(__name__)
+
+
+def count_matches(db: Session) -> int:
+    """Cuenta partidos finalizados almacenados en BD."""
+    return (
+        db.query(Match)
+        .filter(Match.home_goals.isnot(None), Match.away_goals.isnot(None))
+        .count()
+    )
 
 
 def load_match_rows(db: Session) -> list[MatchRow]:
@@ -61,6 +74,46 @@ def build_engine_from_db(db: Session, cfg: EloConfig | None = None,
                [m.home_goals for m in rows], [m.away_goals for m in rows],
                weights=weights)
     return elo, dc, len(rows)
+
+def build_full_engine(
+    db: Session,
+    cfg: EloConfig | None = None,
+    xi: float = 0.0018,
+    xgb_min_rows: int = 100,
+):
+    """
+    Construye Elo + Dixon-Coles + XGBoost (FormModel) desde la BD.
+
+    Returns: (elo_dict, dc, form_model, n_matches)
+        form_model es None si hay < xgb_min_rows partidos o falla el entrenamiento.
+
+    Se llama en startup y tras cada ETL con suficientes partidos nuevos.
+    """
+    elo, dc, n = build_engine_from_db(db, cfg, xi)
+
+    form_model = None
+    if n >= xgb_min_rows:
+        try:
+            from app.services.features import walk_forward
+            from app.models.form_model import FormModel, build_features
+            import numpy as np
+
+            rows = load_match_rows(db)
+            feats, outcomes = walk_forward(rows)
+            if feats:
+                X = build_features(feats)
+                y = np.asarray(outcomes)
+                form_model = FormModel().fit(X, y)
+                logger.info("[bootstrap] XGBoost entrenado con %d muestras", len(y))
+        except Exception as exc:
+            logger.warning("[bootstrap] XGBoost falló (no crítico): %s", exc)
+
+    logger.info(
+        "[bootstrap] Engine listo: %d partidos, %d equipos, DC=%s, XGB=%s",
+        n, len(elo), dc is not None, form_model is not None,
+    )
+    return elo, dc, form_model, n
+
 
 def build_factors_from_db(db: Session,
                           elo_ratings: dict[str, float] | None = None) -> dict[str, TeamFactors]:

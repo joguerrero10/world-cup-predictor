@@ -3,7 +3,8 @@ import type {
   HealthStatus, EloTeam, MatchPrediction, TournamentProbs,
   SimulationJobStatus, SimulationJobResult, LeagueTable,
   SystemStats, ModelWeights, KlementFactor, DixonColesParams,
-  AIAnalysisReport, ScoreMatrix, ModelType, Competition
+  AIAnalysisReport, ScoreMatrix, ModelType, Competition, FixtureItem,
+  TeamDetail
 } from "../types"
 
 // ─── Health ──────────────────────────────────────────────────────────────────
@@ -137,8 +138,17 @@ export const fetchTeamsList = async (): Promise<EloTeam[]> => {
 
 // ─── Players ──────────────────────────────────────────────────────────────────
 
-export const fetchPlayers = async (team?: string, top_n = 100): Promise<{ players: import("../types").PlayerStat[]; team: string; data_status: string }> => {
-  if (!team) return { players: [], team: "", data_status: "pending" }
+export const fetchPlayers = async (
+  team?: string,
+  top_n = 100,
+): Promise<{
+  players: import("../types").PlayerStat[]
+  team: string
+  data_status: string
+  last_synced_at: string | null
+  message: string | null
+}> => {
+  if (!team) return { players: [], team: "", data_status: "pending", last_synced_at: null, message: null }
   const r = await client.get("/api/v1/player-probabilities", { params: { team, top_n } })
   return r.data
 }
@@ -170,6 +180,67 @@ export const sendChatMessage = async (
 
 export const fetchModelPerformance = async () => {
   const r = await client.get("/model-performance")
+  return r.data
+}
+
+// ─── Load from DB ─────────────────────────────────────────────────────────────
+
+// ─── Teams ────────────────────────────────────────────────────────────────────
+
+export const fetchTeams = async (params?: {
+  competition?: string
+  team_type?: "club" | "national"
+  search?: string
+  limit?: number
+}): Promise<TeamDetail[]> => {
+  const r = await client.get("/api/v1/teams", { params })
+  return r.data
+}
+
+// ─── Transfers ────────────────────────────────────────────────────────────────
+
+export const fetchTransfers = async (params?: {
+  team?: string
+  transfer_type?: string
+  limit?: number
+}): Promise<import("../types").TransferItem[]> => {
+  const r = await client.get("/api/v1/transfers", { params })
+  return r.data
+}
+
+// ─── Fixtures / Calendar ──────────────────────────────────────────────────────
+
+export const fetchFixtures = async (params?: {
+  competition?: string
+  date_from?: string
+  date_to?: string
+  status?: "FINISHED" | "LIVE" | "SCHEDULED" | "POSTPONED"
+  limit?: number
+  with_predictions?: boolean
+}): Promise<FixtureItem[]> => {
+  const r = await client.get("/api/v1/fixtures", { params })
+  return r.data
+}
+
+// ─── Model Metrics ────────────────────────────────────────────────────────────
+
+export const fetchModelMetrics = async (): Promise<{
+  stored: Array<{
+    model: string
+    accuracy: number | null
+    brier_score: number | null
+    log_loss: number | null
+    evaluated_at: string | null
+  }>
+  live: Record<string, {
+    n_evaluated: number
+    brier_score: number | null
+    accuracy: number | null
+  }>
+  note: string
+  error?: string
+}> => {
+  const r = await client.get("/api/v1/model-metrics")
   return r.data
 }
 

@@ -16,6 +16,7 @@ from app.api.v1.endpoints.fixtures import router as fixtures_router
 from app.api.v1.endpoints.players import router as players_router
 from app.api.v1.endpoints.transfers import router as transfers_router
 from app.api.v1.endpoints.system import router as system_router
+from app.api.v1.endpoints.teams import router as teams_router
 
 v1_router = APIRouter(prefix="/api/v1")
 
@@ -32,3 +33,4 @@ v1_router.include_router(fixtures_router)
 v1_router.include_router(players_router)
 v1_router.include_router(transfers_router)
 v1_router.include_router(system_router)
+v1_router.include_router(teams_router)

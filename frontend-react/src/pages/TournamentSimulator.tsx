@@ -2,22 +2,26 @@ import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Trophy, Play, RefreshCw, Download } from "lucide-react"
-import { createSimulationJob, fetchSimulationJob, fetchSimulationJobResult, fetchEloRankings } from "../api/endpoints"
+import { createSimulationJob, fetchSimulationJob, fetchSimulationJobResult } from "../api/endpoints"
 import { PlotlyChart, DonutChart } from "../components/ui/PlotlyChart"
 import { Badge } from "../components/ui/Badge"
 import type { SimulationJobStatus, TournamentProbs } from "../types"
 import type { Data } from "plotly.js"
 import clsx from "clsx"
 
+// ─── Configuración de competiciones ──────────────────────────────────────────
+
 const COMPETITIONS = [
-  { id: "fifa_wc_2026",   name: "FIFA World Cup 2026",    emoji: "🌍" },
-  { id: "ucl",            name: "Champions League",       emoji: "⭐" },
-  { id: "premier_league", name: "Premier League",         emoji: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" },
-  { id: "laliga",         name: "LaLiga",                 emoji: "🇪🇸" },
-  { id: "bundesliga",     name: "Bundesliga",             emoji: "🇩🇪" },
-  { id: "serie_a",        name: "Serie A",                emoji: "🇮🇹" },
-  { id: "ligue_1",        name: "Ligue 1",                emoji: "🇫🇷" },
+  { id: "fifa_wc_2026",   name: "FIFA World Cup 2026",  emoji: "🌍", type: "knockout" as const },
+  { id: "ucl",            name: "Champions League",     emoji: "⭐", type: "knockout" as const },
+  { id: "premier_league", name: "Premier League",       emoji: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", type: "league"   as const },
+  { id: "laliga",         name: "LaLiga",               emoji: "🇪🇸", type: "league"   as const },
+  { id: "bundesliga",     name: "Bundesliga",           emoji: "🇩🇪", type: "league"   as const },
+  { id: "serie_a",        name: "Serie A",              emoji: "🇮🇹", type: "league"   as const },
+  { id: "ligue_1",        name: "Ligue 1",              emoji: "🇫🇷", type: "league"   as const },
 ]
+
+const LEAGUE_IDS = new Set(["premier_league", "laliga", "bundesliga", "serie_a", "ligue_1"])
 
 const SIM_OPTIONS = [
   { label: "1K",   value: 1_000 },
@@ -27,17 +31,37 @@ const SIM_OPTIONS = [
   { label: "1M",   value: 1_000_000 },
 ]
 
-function pct(v: number) { return `${(v * 100).toFixed(1)}%` }
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function pct(v: number | undefined) {
+  return `${((v ?? 0) * 100).toFixed(1)}%`
+}
+
+/** Devuelve los datos de "fase previa" según el tipo de competición. */
+function getEarlyRoundData(result: TournamentProbs, competitionId: string): Record<string, number> {
+  if (LEAGUE_IDS.has(competitionId)) return {}
+  return result.extra?.group_qualified ?? result.extra?.league_phase_top8 ?? {}
+}
+
+// ─── Componente principal ─────────────────────────────────────────────────────
 
 export function TournamentSimulator() {
   const [competition, setCompetition] = useState("fifa_wc_2026")
-  const [nSims, setNSims] = useState(10_000)
-  const [jobId, setJobId] = useState<number | null>(null)
-  const [job, setJob] = useState<SimulationJobStatus | null>(null)
-  const [result, setResult] = useState<TournamentProbs | null>(null)
-  const [elapsed, setElapsed] = useState(0)
+  const [nSims, setNSims]             = useState(10_000)
+  const [jobId, setJobId]             = useState<number | null>(null)
+  const [job, setJob]                 = useState<SimulationJobStatus | null>(null)
+  const [result, setResult]           = useState<TournamentProbs | null>(null)
+  const [elapsed, setElapsed]         = useState(0)
 
-  useQuery({ queryKey: ["elo-rankings"], queryFn: fetchEloRankings, staleTime: 60_000 })
+  const isLeague   = LEAGUE_IDS.has(competition)
+  const compConfig = COMPETITIONS.find(c => c.id === competition)!
+
+  // Reset result cuando cambia la competición
+  useEffect(() => {
+    setResult(null)
+    setJob(null)
+    setJobId(null)
+  }, [competition])
 
   // Poll job status
   useQuery({
@@ -56,7 +80,7 @@ export function TournamentSimulator() {
     refetchInterval: 1000,
   })
 
-  // Elapsed timer
+  // Cronómetro visual mientras corre
   useEffect(() => {
     if (job?.status !== "running") { setElapsed(0); return }
     const timer = setInterval(() => setElapsed(e => e + 1), 1000)
@@ -69,17 +93,23 @@ export function TournamentSimulator() {
   })
 
   const isRunning = job?.status === "running" || job?.status === "queued"
-  const champion = result?.champion ? Object.entries(result.champion).sort((a, b) => b[1] - a[1]) : []
+
+  // Ordenar equipos por probabilidad de campeón
+  const champion = result?.champion
+    ? Object.entries(result.champion).sort((a, b) => b[1] - a[1])
+    : []
   const top10Champ = champion.slice(0, 10)
 
-  // Chart: champion bar
+  // Datos del gráfico de barras
   const champBarData: Data[] = top10Champ.length > 0 ? [{
     type: "bar",
     x: top10Champ.map(([_, p]) => p * 100),
     y: top10Champ.map(([t]) => t),
     orientation: "h",
     marker: {
-      color: top10Champ.map((_, i) => i === 0 ? "#F0B429" : i === 1 ? "#E2E8F0" : i === 2 ? "#CD7F32" : "#00D4FF80"),
+      color: top10Champ.map((_, i) =>
+        i === 0 ? "#F0B429" : i === 1 ? "#E2E8F0" : i === 2 ? "#CD7F32" : "#00D4FF80"
+      ),
     },
     text: top10Champ.map(([_, p]) => `${(p * 100).toFixed(1)}%`),
     textposition: "outside",
@@ -87,9 +117,40 @@ export function TournamentSimulator() {
     hovertemplate: "%{y}: %{x:.1f}%<extra></extra>",
   }] : []
 
+  // CSV export — columnas según tipo de competición
+  function exportCsv() {
+    if (!result) return
+    const headers = isLeague
+      ? "Equipo,Campeón,Top4,Top6,Descenso"
+      : "Equipo,Campeón,Finalista,Semifinal,Grupos"
+    const rows = champion.map(([t, p]) => {
+      if (isLeague) {
+        return `${t},${p},${result.top4[t] ?? 0},${result.top6[t] ?? 0},${result.relegated[t] ?? 0}`
+      }
+      const early = getEarlyRoundData(result, competition)
+      return `${t},${p},${result.finalist[t] ?? 0},${result.semifinalist[t] ?? 0},${early[t] ?? 0}`
+    })
+    const csv = [headers, ...rows].join("\n")
+    const blob = new Blob([csv], { type: "text/csv" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url; a.download = `sim_${competition}_${nSims}.csv`; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function exportJson() {
+    if (!result) return
+    const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url; a.download = `sim_${competition}_${nSims}.json`; a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Config */}
+
+      {/* ── Panel de configuración ── */}
       <div className="card space-y-5">
         <div className="flex items-center gap-2">
           <Trophy className="w-5 h-5 text-amber" />
@@ -97,9 +158,12 @@ export function TournamentSimulator() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Competition */}
+
+          {/* Selector de competición */}
           <div className="space-y-2">
-            <label className="text-xs uppercase tracking-wider text-muted font-medium">Competición</label>
+            <label className="text-xs uppercase tracking-wider text-muted font-medium">
+              Competición
+            </label>
             <div className="grid grid-cols-1 gap-2">
               {COMPETITIONS.map(c => (
                 <button
@@ -113,16 +177,26 @@ export function TournamentSimulator() {
                   )}
                 >
                   <span className="text-base">{c.emoji}</span>
-                  {c.name}
+                  <span className="flex-1 text-left">{c.name}</span>
+                  <span className={clsx(
+                    "text-xs px-1.5 py-0.5 rounded",
+                    c.type === "league"
+                      ? "bg-emerald-500/10 text-emerald-400"
+                      : "bg-violet-500/10 text-violet-400"
+                  )}>
+                    {c.type === "league" ? "Liga" : "Copa"}
+                  </span>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Sims + Run */}
+          {/* Sims + botón */}
           <div className="space-y-4">
             <div className="space-y-2">
-              <label className="text-xs uppercase tracking-wider text-muted font-medium">Número de simulaciones</label>
+              <label className="text-xs uppercase tracking-wider text-muted font-medium">
+                Número de simulaciones
+              </label>
               <div className="grid grid-cols-3 gap-2">
                 {SIM_OPTIONS.map(s => (
                   <button
@@ -142,7 +216,7 @@ export function TournamentSimulator() {
               <p className="text-xs text-muted">{nSims.toLocaleString()} simulaciones Monte Carlo</p>
             </div>
 
-            {/* ETA estimate */}
+            {/* ETA */}
             <div className="bg-gradient-field rounded-xl p-4 space-y-1 border border-border">
               <p className="text-xs text-muted uppercase tracking-wider">Tiempo estimado</p>
               <p className="font-display text-2xl text-cyan tracking-wider">
@@ -159,14 +233,16 @@ export function TournamentSimulator() {
                 (isPending || isRunning) && "opacity-60 cursor-not-allowed"
               )}
             >
-              {isRunning ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+              {isRunning
+                ? <RefreshCw className="w-4 h-4 animate-spin" />
+                : <Play className="w-4 h-4" />}
               {isRunning ? "Simulando..." : "INICIAR SIMULACIÓN"}
             </button>
           </div>
         </div>
       </div>
 
-      {/* Job progress */}
+      {/* ── Progreso del job ── */}
       <AnimatePresence>
         {job && (
           <motion.div
@@ -178,13 +254,15 @@ export function TournamentSimulator() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="section-label">Job #{job.id}</p>
-                <h3 className="section-title text-xl">ESTADO DE SIMULACIÓN</h3>
+                <h3 className="section-title text-xl">
+                  {compConfig.emoji} {compConfig.name} — {nSims.toLocaleString()} sims
+                </h3>
               </div>
               <Badge
                 variant={
                   job.status === "completed" ? "green" :
-                  job.status === "running"   ? "cyan" :
-                  job.status === "failed"    ? "red" : "amber"
+                  job.status === "running"   ? "cyan"  :
+                  job.status === "failed"    ? "red"   : "amber"
                 }
               >
                 {job.status.toUpperCase()}
@@ -193,7 +271,9 @@ export function TournamentSimulator() {
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div className="stat-card">
-                <span className="stat-value text-cyan">{isRunning ? elapsed : (job.duration_seconds?.toFixed(1) ?? "—")}s</span>
+                <span className="stat-value text-cyan">
+                  {isRunning ? elapsed : (job.duration_seconds?.toFixed(1) ?? "—")}s
+                </span>
                 <span className="stat-label">{isRunning ? "Transcurrido" : "Duración"}</span>
               </div>
               <div className="stat-card">
@@ -201,8 +281,8 @@ export function TournamentSimulator() {
                 <span className="stat-label">Simulaciones</span>
               </div>
               <div className="stat-card">
-                <span className="stat-value text-text">{COMPETITIONS.find(c => c.id === competition)?.emoji ?? "🏆"}</span>
-                <span className="stat-label">{job.competition_id}</span>
+                <span className="stat-value text-text">{compConfig.emoji}</span>
+                <span className="stat-label">{compConfig.name}</span>
               </div>
               <div className="stat-card">
                 <span className="stat-value text-text">{job.model_name?.toUpperCase()}</span>
@@ -219,7 +299,9 @@ export function TournamentSimulator() {
                     transition={{ duration: 3, ease: "easeInOut" }}
                   />
                 </div>
-                <p className="text-xs text-muted text-center">Procesando {nSims.toLocaleString()} torneos...</p>
+                <p className="text-xs text-muted text-center">
+                  Procesando {nSims.toLocaleString()} torneos...
+                </p>
               </div>
             )}
 
@@ -232,7 +314,7 @@ export function TournamentSimulator() {
         )}
       </AnimatePresence>
 
-      {/* Results */}
+      {/* ── Resultados ── */}
       <AnimatePresence>
         {result && (
           <motion.div
@@ -240,7 +322,25 @@ export function TournamentSimulator() {
             animate={{ opacity: 1, y: 0 }}
             className="space-y-4"
           >
-            {/* Top 3 heroes */}
+            {/* Meta info */}
+            <div className="flex items-center gap-4 text-xs text-muted">
+              <span>{result.n_sims.toLocaleString()} simulaciones</span>
+              <span>·</span>
+              <span>{result.elapsed_seconds?.toFixed(1)}s</span>
+              <span>·</span>
+              <span>{result.sims_per_second?.toLocaleString()} sims/s</span>
+              <span>·</span>
+              <span className={clsx(
+                "px-2 py-0.5 rounded text-xs",
+                result.team_type === "national"
+                  ? "bg-violet-500/10 text-violet-400"
+                  : "bg-emerald-500/10 text-emerald-400"
+              )}>
+                {result.team_type === "national" ? "Selecciones" : "Clubes"}
+              </span>
+            </div>
+
+            {/* Podio: Top 3 */}
             {champion.length >= 3 && (
               <div>
                 <p className="section-label mb-3">Campeones más probables</p>
@@ -267,11 +367,10 @@ export function TournamentSimulator() {
               </div>
             )}
 
-            {/* Charts grid */}
+            {/* Gráficos */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Champion bar */}
               <div className="card">
-                <p className="section-label mb-2">Top 10 — Probabilidad campeón</p>
+                <p className="section-label mb-2">Top 10 — Probabilidad de campeón</p>
                 <PlotlyChart
                   data={champBarData}
                   height={320}
@@ -283,8 +382,6 @@ export function TournamentSimulator() {
                   }}
                 />
               </div>
-
-              {/* Donut */}
               <div className="card">
                 <p className="section-label mb-2">Distribución de campeones (Top 5)</p>
                 <DonutChart
@@ -295,7 +392,7 @@ export function TournamentSimulator() {
               </div>
             </div>
 
-            {/* Full table */}
+            {/* Tabla de probabilidades */}
             <div className="card">
               <p className="section-label mb-3">Tabla completa de probabilidades</p>
               <div className="overflow-x-auto">
@@ -305,60 +402,69 @@ export function TournamentSimulator() {
                       <th>#</th>
                       <th>Equipo</th>
                       <th>Campeón</th>
-                      <th>Finalista</th>
-                      <th>Semifinal</th>
-                      <th>Fase grupos</th>
+                      {isLeague ? (
+                        <>
+                          <th>Top 4</th>
+                          <th>Top 6</th>
+                          <th className="text-scarlet/80">Descenso</th>
+                        </>
+                      ) : (
+                        <>
+                          <th>Finalista</th>
+                          <th>Semifinal</th>
+                          <th>{competition === "ucl" ? "Fase grupos" : "Clasificó grupos"}</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
-                    {champion.map(([team, prob], i) => (
-                      <tr key={team} className={i < 3 ? "text-amber" : ""}>
-                        <td className="font-display text-lg w-8">
-                          {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : i + 1}
-                        </td>
-                        <td className="font-medium">{team}</td>
-                        <td>
-                          <div className="flex items-center gap-2">
-                            <div className="w-16 h-1.5 bg-border rounded overflow-hidden">
-                              <div className="h-full bg-amber rounded" style={{ width: pct(prob) }} />
+                    {champion.map(([team, prob], i) => {
+                      const earlyRound = getEarlyRoundData(result, competition)
+                      return (
+                        <tr key={team} className={i < 3 ? "text-amber" : ""}>
+                          <td className="font-display text-lg w-8">
+                            {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : i + 1}
+                          </td>
+                          <td className="font-medium">{team}</td>
+                          <td>
+                            <div className="flex items-center gap-2">
+                              <div className="w-16 h-1.5 bg-border rounded overflow-hidden">
+                                <div
+                                  className="h-full bg-amber rounded"
+                                  style={{ width: pct(prob) }}
+                                />
+                              </div>
+                              <span className="text-xs text-amber">{pct(prob)}</span>
                             </div>
-                            <span className="text-xs text-amber">{pct(prob)}</span>
-                          </div>
-                        </td>
-                        <td className="text-cyan">{pct(result.finalist[team] ?? 0)}</td>
-                        <td className="text-muted">{pct(result.semifinalist[team] ?? 0)}</td>
-                        <td className="text-muted">{pct(result.group_qualified[team] ?? 0)}</td>
-                      </tr>
-                    ))}
+                          </td>
+                          {isLeague ? (
+                            <>
+                              <td className="text-cyan">{pct(result.top4[team])}</td>
+                              <td className="text-muted">{pct(result.top6[team])}</td>
+                              <td className="text-scarlet">{pct(result.relegated[team])}</td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="text-cyan">{pct(result.finalist[team])}</td>
+                              <td className="text-muted">{pct(result.semifinalist[team])}</td>
+                              <td className="text-muted">{pct(earlyRound[team])}</td>
+                            </>
+                          )}
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
             </div>
 
-            {/* Export */}
+            {/* Exportar */}
             <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => {
-                  const csv = ["Equipo,Campeón,Finalista,Semifinal,Grupos",
-                    ...champion.map(([t, p]) => `${t},${p},${result.finalist[t] ?? 0},${result.semifinalist[t] ?? 0},${result.group_qualified[t] ?? 0}`)
-                  ].join("\n")
-                  const blob = new Blob([csv], { type: "text/csv" })
-                  const url = URL.createObjectURL(blob)
-                  const a = document.createElement("a"); a.href = url; a.download = `sim_${competition}_${nSims}.csv`; a.click()
-                }}
-                className="btn-ghost flex items-center gap-2"
-              >
+              <button onClick={exportCsv} className="btn-ghost flex items-center gap-2">
                 <Download className="w-4 h-4" />
                 Exportar CSV
               </button>
-              <button
-                onClick={() => {
-                  const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" })
-                  const url = URL.createObjectURL(blob)
-                  const a = document.createElement("a"); a.href = url; a.download = `sim_${competition}_${nSims}.json`; a.click()
-                }}
-                className="btn-ghost flex items-center gap-2"
-              >
+              <button onClick={exportJson} className="btn-ghost flex items-center gap-2">
                 <Download className="w-4 h-4" />
                 Exportar JSON
               </button>

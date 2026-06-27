@@ -18,6 +18,8 @@ Cubre:
 """
 from __future__ import annotations
 
+import json
+import logging
 import os
 import time
 from datetime import date
@@ -33,6 +35,17 @@ from .base import (
     StandingData,
     TeamData,
 )
+
+logger = logging.getLogger(__name__)
+
+# Cache TTL (segundos)
+_CACHE_TTL_LIVE = 3_600        # 1 hora — partidos recientes / en juego
+_CACHE_TTL_HISTORICAL = 86_400  # 24 horas — temporadas pasadas
+
+# Backoff exponencial en rate-limit
+_MAX_RETRIES = 4
+_BACKOFF_BASE = 65    # segundos iniciales en 429
+_BACKOFF_MAX = 600    # techo: 10 minutos
 
 BASE_URL = "https://v3.football.api-sports.io"
 
@@ -102,7 +115,12 @@ class APIFootballProvider(BaseProvider):
     name = "api_football"
     _MIN_INTERVAL = 2.0     # segundos entre requests (30/min máximo)
 
-    def __init__(self, api_key: Optional[str] = None, use_rapidapi: bool = False):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        use_rapidapi: bool = False,
+        redis_url: Optional[str] = None,
+    ):
         super().__init__()
         self.api_key = api_key or os.getenv("API_FOOTBALL_KEY", "")
         self.use_rapidapi = use_rapidapi
@@ -122,45 +140,112 @@ class APIFootballProvider(BaseProvider):
 
         self._last_request_at: float = 0.0
         self._daily_count: int = 0
+        self._redis = self._init_redis(redis_url or os.getenv("REDIS_URL", ""))
 
     def is_available(self) -> bool:
         return bool(self.api_key)
 
     # ------------------------------------------------------------------
-    # HTTP
+    # Redis cache
     # ------------------------------------------------------------------
 
-    def _get(self, endpoint: str, params: Optional[dict] = None) -> dict:
+    @staticmethod
+    def _init_redis(redis_url: str):
+        if not redis_url:
+            return None
+        try:
+            import redis as _rlib
+            client = _rlib.from_url(redis_url, socket_connect_timeout=2, decode_responses=True)
+            client.ping()
+            return client
+        except Exception as exc:
+            logger.warning("[api_football] Redis no disponible (%s), cache desactivado.", exc)
+            return None
+
+    def _cache_key(self, endpoint: str, params: Optional[dict]) -> str:
+        sorted_params = "&".join(f"{k}={v}" for k, v in sorted((params or {}).items()))
+        return f"apif:{endpoint}:{sorted_params}"
+
+    def _cache_get(self, key: str) -> Optional[dict]:
+        if self._redis is None:
+            return None
+        try:
+            val = self._redis.get(key)
+            return json.loads(val) if val else None
+        except Exception:
+            return None
+
+    def _cache_set(self, key: str, data: dict, ttl: int) -> None:
+        if self._redis is None:
+            return
+        try:
+            self._redis.setex(key, ttl, json.dumps(data, default=str))
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # HTTP con backoff exponencial + cache
+    # ------------------------------------------------------------------
+
+    def _get(
+        self,
+        endpoint: str,
+        params: Optional[dict] = None,
+        cache_ttl: int = _CACHE_TTL_LIVE,
+    ) -> dict:
+        cache_key = self._cache_key(endpoint, params)
+
+        # 1. Intentar cache
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            logger.debug("[api_football] cache HIT: %s", cache_key)
+            return cached
+
+        # 2. Rate-limit local (intervalo mínimo entre requests)
         elapsed = time.monotonic() - self._last_request_at
         if elapsed < self._MIN_INTERVAL:
             time.sleep(self._MIN_INTERVAL - elapsed)
 
         url = f"{self._base_url}/{endpoint}"
-        try:
-            resp = self._session.get(url, params=params, timeout=30)
-            self._last_request_at = time.monotonic()
-            self._daily_count += 1
+        backoff = _BACKOFF_BASE
 
-            if resp.status_code == 429:
-                wait = int(resp.headers.get("Retry-After", 60))
-                self._warn(f"Rate limit. Esperando {wait}s")
-                time.sleep(wait)
+        for attempt in range(_MAX_RETRIES):
+            try:
                 resp = self._session.get(url, params=params, timeout=30)
                 self._last_request_at = time.monotonic()
+                self._daily_count += 1
 
-            resp.raise_for_status()
-            data = resp.json()
+                if resp.status_code == 429:
+                    wait = int(resp.headers.get("Retry-After", backoff))
+                    self._warn(
+                        f"Rate limit (intento {attempt + 1}/{_MAX_RETRIES}). "
+                        f"Esperando {wait}s..."
+                    )
+                    time.sleep(wait)
+                    backoff = min(backoff * 2, _BACKOFF_MAX)
+                    continue
 
-            if data.get("errors") and data["errors"] != [] and data["errors"] != {}:
-                raise ProviderError(f"API error: {data['errors']}")
+                resp.raise_for_status()
+                data = resp.json()
 
-            return data
-        except requests.Timeout:
-            raise ProviderError(f"Timeout en {url}")
-        except requests.ConnectionError as e:
-            raise ProviderError(f"Error de conexión: {e}")
-        except requests.HTTPError as e:
-            raise ProviderError(f"HTTP {e.response.status_code}: {url}")
+                errors = data.get("errors", [])
+                if errors and errors not in ([], {}):
+                    raise ProviderError(f"API error: {errors}")
+
+                # Guardar en cache solo respuestas válidas
+                self._cache_set(cache_key, data, cache_ttl)
+                return data
+
+            except ProviderError:
+                raise
+            except requests.Timeout:
+                raise ProviderError(f"Timeout en {url}")
+            except requests.ConnectionError as exc:
+                raise ProviderError(f"Error de conexión: {exc}")
+            except requests.HTTPError as exc:
+                raise ProviderError(f"HTTP {exc.response.status_code}: {url}")
+
+        raise ProviderError(f"Rate limit: max {_MAX_RETRIES} reintentos agotados para {url}")
 
     def _league_id(self, slug: str) -> Optional[int]:
         lid = LEAGUE_IDS.get(slug)
@@ -176,21 +261,32 @@ class APIFootballProvider(BaseProvider):
         self,
         competition_slug: str,
         season: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
     ) -> list[MatchData]:
         lid = self._league_id(competition_slug)
         if not lid:
             return []
 
-        params = {
+        _season = season or date.today().year
+        params: dict = {
             "league": lid,
-            "season": season or date.today().year,
-            "status": "FT",         # solo finalizados
+            "season": _season,
+            "status": "FT",
         }
+        if date_from:
+            params["from"] = date_from.isoformat()
+        if date_to:
+            params["to"] = date_to.isoformat()
+
+        # Datos históricos tienen TTL más largo (ya no cambian)
+        is_historical = _season < date.today().year
+        cache_ttl = _CACHE_TTL_HISTORICAL if is_historical else _CACHE_TTL_LIVE
 
         try:
-            data = self._get("fixtures", params)
+            data = self._get("fixtures", params, cache_ttl=cache_ttl)
         except ProviderError as e:
-            self._error(f"fetch_matches({competition_slug}): {e}")
+            self._error(f"fetch_matches({competition_slug}, season={_season}): {e}")
             return []
 
         results: list[MatchData] = []
@@ -247,16 +343,23 @@ class APIFootballProvider(BaseProvider):
             self._error(f"fetch_teams({competition_slug}): {e}")
             return []
 
-        return [
-            TeamData(
-                name=t["team"]["name"],
-                short_name=t["team"].get("code"),
-                country=t["team"].get("country"),
+        result: list[TeamData] = []
+        for t in data.get("response", []):
+            team_info  = t.get("team", {})
+            venue_info = t.get("venue", {})
+            name = team_info.get("name", "").strip()
+            if not name:
+                continue
+            result.append(TeamData(
+                name=name,
+                short_name=team_info.get("code"),
+                country=team_info.get("country"),
+                logo_url=team_info.get("logo"),
+                founded_year=team_info.get("founded"),
+                stadium=venue_info.get("name"),
                 data_source=self.name,
-            )
-            for t in data.get("response", [])
-            if t.get("team", {}).get("name")
-        ]
+            ))
+        return result
 
     # ------------------------------------------------------------------
     # fetch_standings
@@ -462,6 +565,24 @@ class APIFootballProvider(BaseProvider):
         appearances = games_g.get("appearences") or 1
         per90 = minutes / 90.0 if minutes > 0 else 1.0
 
+        # xG y rating (disponibles en el plan Pro de API-Football)
+        xg_total = stats.get("goals", {}).get("expected")
+        raw_rating = games_g.get("rating")
+
+        xg_per_90: Optional[float] = None
+        if xg_total is not None and per90 > 0:
+            try:
+                xg_per_90 = round(float(xg_total) / per90, 3)
+            except (TypeError, ValueError):
+                pass
+
+        overall_rating: Optional[float] = None
+        if raw_rating is not None:
+            try:
+                overall_rating = round(float(raw_rating), 2)
+            except (TypeError, ValueError):
+                pass
+
         return PlayerData(
             name=name,
             team_name=team_name,
@@ -472,7 +593,9 @@ class APIFootballProvider(BaseProvider):
             data_source=self.name,
             goals_per_90=round((goals_g.get("total") or 0) / per90, 3) if per90 > 0 else None,
             assists_per_90=round((goals_g.get("assists") or 0) / per90, 3) if per90 > 0 else None,
+            xg_per_90=xg_per_90,
             minutes_played=minutes,
             yellow_cards_per_90=round((cards_g.get("yellow") or 0) / per90, 3) if per90 > 0 else None,
             red_cards_per_90=round((cards_g.get("red") or 0) / per90, 3) if per90 > 0 else None,
+            overall_rating=overall_rating,
         )
