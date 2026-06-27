@@ -13,7 +13,7 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./app/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wcp}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wcp} -d ${POSTGRES_DB:-worldcup}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -53,9 +53,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
       interval: 10s
-      timeout: 5s
+      timeout: 15s
       retries: 12
-      start_period: 120s
+      start_period: 60s
     restart: unless-stopped
 
   # ── Worker Celery (simulaciones + ETL) ────────────────────────────────────
@@ -76,6 +76,7 @@ services:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-wcp}:${POSTGRES_PASSWORD:-wcp}@db:5432/${POSTGRES_DB:-worldcup}
       REDIS_URL:    redis://redis:6379/0
       API_URL:      http://api:8000
+      PYTHONPATH:   /app
     volumes:
       - ./data:/app/data
     deploy:

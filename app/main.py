@@ -507,15 +507,17 @@ def load_factors():
 
 @app.get("/health")
 def health():
+    db_ok = False
     with SessionLocal() as db:
         try:
-            n_matches = count_matches(db)
+            db.execute(text("SELECT 1"))
+            db_ok = True
         except Exception:
-            n_matches = -1
+            pass
     return {
         "status": "ok",
+        "db": db_ok,
         "teams_loaded": len(STATE.elo),
-        "matches_in_db": n_matches,
         "dc_ready": STATE.dc is not None and STATE.dc.params is not None,
         "xgb_ready": STATE.form_model is not None,
         "klement_factors_loaded": len(STATE.factors),

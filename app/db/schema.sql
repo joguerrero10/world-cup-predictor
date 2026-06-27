@@ -28,17 +28,6 @@ CREATE TABLE IF NOT EXISTS seasons (
     UNIQUE(competition_id, year_start)
 );
 
-CREATE TABLE IF NOT EXISTS season_teams (
-    id                  SERIAL PRIMARY KEY,
-    season_id           INTEGER REFERENCES seasons(id),
-    team_id             INTEGER REFERENCES teams(id),
-    group_name          TEXT,
-    final_position      INTEGER,
-    is_promoted         BOOLEAN DEFAULT FALSE,
-    is_relegated        BOOLEAN DEFAULT FALSE,
-    UNIQUE(season_id, team_id)
-);
-
 -- ── Equipos ───────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS teams (
@@ -52,9 +41,26 @@ CREATE TABLE IF NOT EXISTS teams (
     football_culture    DOUBLE PRECISION,            -- 0..1
     avg_temp_c          DOUBLE PRECISION,
     is_host             BOOLEAN DEFAULT FALSE,
+    logo_url            TEXT,
+    founded_year        INTEGER,
+    stadium             TEXT,
+    market_value_eur    DOUBLE PRECISION,
     data_source         TEXT,
     last_synced_at      TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS season_teams (
+    id                  SERIAL PRIMARY KEY,
+    season_id           INTEGER REFERENCES seasons(id),
+    team_id             INTEGER REFERENCES teams(id),
+    group_name          TEXT,
+    final_position      INTEGER,
+    is_promoted         BOOLEAN DEFAULT FALSE,
+    is_relegated        BOOLEAN DEFAULT FALSE,
+    UNIQUE(season_id, team_id)
+);
+
+
 
 -- ── Jugadores (ampliado) ──────────────────────────────────────────────────
 
